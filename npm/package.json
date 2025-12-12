@@ -1,0 +1,32 @@
+{
+  "name": "mcp-redhat-kb",
+  "version": "1.0.0",
+  "description": "MCP Server for Red Hat Knowledge Base",
+  "main": "cli.js",
+  "bin": {
+    "mcp-redhat-kb": "./cli.js"
+  },
+  "scripts": {
+    "start": "node cli.js"
+  },
+  "keywords": [
+    "mcp",
+    "redhat",
+    "knowledge-base",
+    "claude",
+    "ai"
+  ],
+  "author": "Jean Lopez",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeanlopezxyz/mcp-redhat-kb"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "cli.js",
+    "README.md"
+  ]
+}
