@@ -178,37 +178,54 @@ Endpoint: `http://localhost:9081/mcp/sse`
 
 ## Tools
 
-This server provides **2 tools** for searching Red Hat Knowledge Base:
+This server provides **5 tools** for searching Red Hat Knowledge Base:
 
-### `searchKnowledgeBase`
+### Search
 
-Search Red Hat Knowledge Base for articles and solutions.
+#### `searchKnowledgeBase`
+Search Red Hat Knowledge Base for solutions and articles. Use error messages or technical keywords.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | Search keywords (use error messages for best results) |
-| `maxResults` | integer | No | Maximum results to return (default: `10`) |
-| `product` | string | No | Product filter (e.g.: `OpenShift`, `RHEL`) |
+| `query` | string | Yes | Search keywords |
+| `maxResults` | integer | No | Max results 1-50 (default: `10`) |
+| `product` | string | No | Filter: `OpenShift`, `RHEL` |
 | `documentType` | string | No | Type: `Solution`, `Documentation`, `Article` |
 
-**Returns:** List of matching articles with ID, title, URL, and summary.
+#### `getSolution`
+Get full content of a Knowledge Base article. Use article ID from search results.
 
-**Examples:**
-- Search for error: `searchKnowledgeBase query='CrashLoopBackOff openshift'`
-- Filter by type: `searchKnowledgeBase query='etcd timeout' documentType='Solution'`
-- Filter by product: `searchKnowledgeBase query='authentication error' product='OpenShift'`
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `solutionId` | string | Yes | Article ID (numeric) |
 
 ---
 
-### `getSolution`
+### Troubleshooting
 
-Get the full content of a solution or article from the Red Hat Knowledge Base.
+#### `troubleshootError`
+Search for solutions to an error message. Optimized for troubleshooting.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `solutionId` | string | Yes | Solution ID from search results (e.g.: `7129807`) |
+| `errorMessage` | string | Yes | Error message to search |
+| `product` | string | No | Product (default: `OpenShift`) |
 
-**Returns:** Full article content including environment, issue, root cause, diagnostic steps, and resolution.
+#### `findSolutionForAlert`
+Find KB solutions for a Prometheus/OpenShift alert name.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `alertName` | string | Yes | Alert name (e.g., `KubePodCrashLooping`) |
+| `product` | string | No | Product (default: `OpenShift`) |
+
+#### `searchDocumentation`
+Search Red Hat documentation for how-to guides and best practices.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `topic` | string | Yes | Topic to search |
+| `product` | string | No | Product (default: `OpenShift`) |
 
 ---
 
