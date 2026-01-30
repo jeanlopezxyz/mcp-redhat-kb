@@ -1,4 +1,4 @@
-package com.redhat.kb.dto;
+package com.redhat.kb.infrastructure.dto;
 
 import java.util.List;
 
@@ -152,9 +152,7 @@ public class KnowledgeBaseArticleDto {
         if (value instanceof List) {
             return (List<String>) value;
         }
-        if (value instanceof String) {
-            String str = (String) value;
-            // Skip "subscriber_only" marker
+        if (value instanceof String str) {
             if ("subscriber_only".equals(str)) {
                 return null;
             }

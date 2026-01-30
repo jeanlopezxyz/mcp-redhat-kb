@@ -1,4 +1,4 @@
-package com.redhat.kb.client;
+package com.redhat.kb.infrastructure.client;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -10,7 +10,7 @@ import java.util.Base64;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.redhat.kb.config.RedHatApiConfig;
+import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,8 +19,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 /**
- * Cliente para autenticacion con Red Hat.
- * Soporta tokens JWT directos y offline tokens de SSO.
+ * Client for Red Hat authentication.
+ * Supports direct JWT tokens and SSO offline tokens.
  */
 @ApplicationScoped
 public class RedHatAuthClient {
@@ -43,7 +43,7 @@ public class RedHatAuthClient {
     }
 
     /**
-     * Obtiene un token de acceso valido.
+     * Gets a valid access token.
      */
     public String getAccessToken() {
         if (cachedAccessToken != null && tokenExpiry != null && Instant.now().isBefore(tokenExpiry)) {
@@ -53,7 +53,7 @@ public class RedHatAuthClient {
     }
 
     /**
-     * Detecta si el token proporcionado es un JWT directo (access token).
+     * Detects if the provided token is a direct JWT (access token).
      */
     private boolean isJwtToken(String token) {
         if (token == null || token.isBlank()) {
@@ -67,12 +67,12 @@ public class RedHatAuthClient {
             String payload = new String(Base64.getUrlDecoder().decode(parts[1]));
             JsonNode json = objectMapper.readTree(payload);
 
-            // Si tiene "typ": "Offline", es un offline token que debe intercambiarse
+            // If it has "typ": "Offline", it's an offline token that must be exchanged
             if (json.has("typ") && "Offline".equals(json.get("typ").asText())) {
                 return false;
             }
 
-            // Si tiene "exp", es un JWT directo (access token)
+            // If it has "exp", it's a direct JWT (access token)
             return json.has("exp");
         } catch (Exception e) {
             return false;
@@ -80,7 +80,7 @@ public class RedHatAuthClient {
     }
 
     /**
-     * Extrae la fecha de expiracion de un token JWT.
+     * Extracts the expiration date from a JWT token.
      */
     private Instant getJwtExpiry(String token) {
         try {
@@ -92,18 +92,18 @@ public class RedHatAuthClient {
                 return Instant.ofEpochSecond(expSeconds);
             }
         } catch (Exception e) {
-            // Ignorar errores de parsing
+            // Ignore parsing errors
         }
         return Instant.now().plusSeconds(3600);
     }
 
     /**
-     * Refresca el token de acceso.
+     * Refreshes the access token.
      */
     private String refreshAccessToken() {
         try {
             String token = config.offlineToken()
-                    .orElseThrow(() -> new RuntimeException("Token no configurado. Configure REDHAT_TOKEN."));
+                    .orElseThrow(() -> new RuntimeException("Token not configured. Set REDHAT_TOKEN."));
 
             if (isDirectJwt == null) {
                 isDirectJwt = isJwtToken(token);
@@ -132,20 +132,28 @@ public class RedHatAuthClient {
 
             if (response.statusCode() == Response.Status.OK.getStatusCode()) {
                 JsonNode json = objectMapper.readTree(response.body());
-                cachedAccessToken = json.get("access_token").asText();
-                int expiresIn = json.get("expires_in").asInt();
+
+                JsonNode accessTokenNode = json.get("access_token");
+                JsonNode expiresInNode = json.get("expires_in");
+
+                if (accessTokenNode == null || expiresInNode == null) {
+                    throw new RuntimeException("Invalid response from Red Hat SSO: missing access_token or expires_in");
+                }
+
+                cachedAccessToken = accessTokenNode.asText();
+                int expiresIn = expiresInNode.asInt();
                 tokenExpiry = Instant.now().plusSeconds(expiresIn - config.sso().tokenRenewalBufferSeconds());
                 return cachedAccessToken;
             } else {
-                throw new RuntimeException("Error obteniendo token de Red Hat SSO: " + response.statusCode() + " - " + response.body());
+                throw new RuntimeException("Error getting token from Red Hat SSO: " + response.statusCode() + " - " + response.body());
             }
         } catch (Exception e) {
-            throw new RuntimeException("Error en autenticacion con Red Hat: " + e.getMessage(), e);
+            throw new RuntimeException("Error authenticating with Red Hat: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Verifica si el servicio esta configurado correctamente.
+     * Checks if the service is properly configured.
      */
     public boolean isConfigured() {
         return config.isConfigured();

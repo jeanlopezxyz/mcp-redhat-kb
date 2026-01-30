@@ -1,4 +1,4 @@
-package com.redhat.kb.config;
+package com.redhat.kb.infrastructure.config;
 
 import java.util.Optional;
 
@@ -6,28 +6,28 @@ import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
 
 /**
- * Configuracion para la API de Knowledge Base de Red Hat.
+ * Configuration for Red Hat Knowledge Base API.
  */
 @ConfigMapping(prefix = "redhat.api")
 public interface RedHatApiConfig {
 
     /**
-     * Token offline de Red Hat para autenticacion.
+     * Red Hat offline token for authentication.
      */
     Optional<String> offlineToken();
 
     /**
-     * Configuracion de SSO.
+     * SSO configuration.
      */
     Sso sso();
 
     /**
-     * Timeouts de conexion.
+     * Connection timeouts.
      */
     Timeouts timeouts();
 
     /**
-     * Verifica si el servicio esta configurado correctamente.
+     * Checks if the service is properly configured.
      */
     default boolean isConfigured() {
         return offlineToken().isPresent() &&

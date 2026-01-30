@@ -1,9 +1,9 @@
-package com.redhat.kb.service;
+package com.redhat.kb.application.service;
 
-import com.redhat.kb.config.RedHatApiConfig;
-import com.redhat.kb.client.KnowledgeBaseClient;
-import com.redhat.kb.client.RedHatAuthClient;
-import com.redhat.kb.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.config.RedHatApiConfig;
+import com.redhat.kb.infrastructure.client.KnowledgeBaseClient;
+import com.redhat.kb.infrastructure.client.RedHatAuthClient;
+import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -12,14 +12,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+import static com.redhat.kb.KnowledgeBaseConstants.DEFAULT_MAX_RESULTS;
+
 /**
  * Application service for Red Hat Knowledge Base operations.
  * Provides search and retrieval of technical articles, solutions, and documentation.
  */
 @ApplicationScoped
 public class KnowledgeBaseService {
-
-    private static final int DEFAULT_MAX_RESULTS = 10;
 
     private final RedHatApiConfig config;
     private final KnowledgeBaseClient kbClient;

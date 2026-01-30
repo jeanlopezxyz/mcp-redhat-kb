@@ -1,4 +1,4 @@
-package com.redhat.kb.dto;
+package com.redhat.kb.infrastructure.dto;
 
 import java.util.List;
 
@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * DTO para la respuesta de busqueda del Knowledge Base de Red Hat (Hydra API).
+ * DTO for Red Hat Knowledge Base search response (Hydra API).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class KnowledgeBaseSearchResponseDto {

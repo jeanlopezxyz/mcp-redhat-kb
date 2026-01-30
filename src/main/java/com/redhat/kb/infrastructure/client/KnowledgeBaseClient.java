@@ -1,4 +1,4 @@
-package com.redhat.kb.client;
+package com.redhat.kb.infrastructure.client;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.redhat.kb.config.RedHatApiConfig;
-import com.redhat.kb.dto.KnowledgeBaseArticleDto;
-import com.redhat.kb.dto.KnowledgeBaseSearchResponseDto;
+import com.redhat.kb.infrastructure.config.RedHatApiConfig;
+import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.dto.KnowledgeBaseSearchResponseDto;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,8 +21,8 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 
 /**
- * Cliente HTTP para el Knowledge Base de Red Hat (Hydra API).
- * Permite buscar articulos, soluciones y documentacion tecnica.
+ * HTTP client for Red Hat Knowledge Base (Hydra API).
+ * Enables searching articles, solutions, and technical documentation.
  */
 @ApplicationScoped
 public class KnowledgeBaseClient {
@@ -51,7 +51,7 @@ public class KnowledgeBaseClient {
     }
 
     /**
-     * Busca articulos en el Knowledge Base de Red Hat.
+     * Searches articles in Red Hat Knowledge Base.
      */
     public List<KnowledgeBaseArticleDto> search(String query, int maxResults, String product, String documentType) {
         try {
@@ -86,15 +86,15 @@ public class KnowledgeBaseClient {
                     ? searchResponse.getResponse().getDocs()
                     : List.of();
             } else {
-                throw new RuntimeException("Error buscando en Knowledge Base: " + response.statusCode() + " - " + response.body());
+                throw new RuntimeException("Error searching Knowledge Base: " + response.statusCode() + " - " + response.body());
             }
         } catch (Exception e) {
-            throw new RuntimeException("Error conectando con Hydra API", e);
+            throw new RuntimeException("Error connecting to Hydra API", e);
         }
     }
 
     /**
-     * Obtiene el detalle completo de una solucion por su ID.
+     * Gets the full details of a solution by its ID.
      */
     public Optional<KnowledgeBaseArticleDto> getSolution(String solutionId) {
         try {
@@ -124,10 +124,10 @@ public class KnowledgeBaseClient {
                 }
                 return Optional.empty();
             } else {
-                throw new RuntimeException("Error obteniendo solucion: " + response.statusCode());
+                throw new RuntimeException("Error getting solution: " + response.statusCode());
             }
         } catch (Exception e) {
-            throw new RuntimeException("Error conectando con Hydra API", e);
+            throw new RuntimeException("Error connecting to Hydra API", e);
         }
     }
 }
