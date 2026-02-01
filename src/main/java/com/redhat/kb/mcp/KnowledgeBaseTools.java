@@ -36,9 +36,9 @@ public class KnowledgeBaseTools {
             + "Use error messages or technical keywords. Filter by product or documentType.")
     public Uni<ToolResponse> searchKnowledgeBase(
             @ToolArg(description = "Search keywords") String query,
-            @ToolArg(description = "Max results (1-50)") Integer maxResults,
-            @ToolArg(description = "Product filter: 'OpenShift', 'RHEL'") String product,
-            @ToolArg(description = "Type: 'Solution', 'Documentation', 'Article'") String documentType) {
+            @ToolArg(description = "Max results 1-50 (default: 10)", defaultValue = "") String maxResultsStr,
+            @ToolArg(description = "Product filter: 'OpenShift', 'RHEL' (default: OpenShift)", defaultValue = "") String product,
+            @ToolArg(description = "Type: 'Solution', 'Documentation', 'Article'", defaultValue = "") String documentType) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -52,7 +52,7 @@ public class KnowledgeBaseTools {
             }
 
             try {
-                int limit = (maxResults == null) ? DEFAULT_MAX_RESULTS : Math.max(MIN_RESULTS, Math.min(MAX_RESULTS, maxResults));
+                int limit = parseMaxResults(maxResultsStr);
                 String validProduct = (product == null || product.isBlank()) ? "" : product.trim();
                 String validDocType = (documentType == null || documentType.isBlank()) ? "" : documentType.trim();
 
@@ -95,7 +95,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Search for solutions to an error message. Optimized for troubleshooting.")
     public Uni<ToolResponse> troubleshootError(
             @ToolArg(description = "Error message") String errorMessage,
-            @ToolArg(description = "Product (default: OpenShift)") String product) {
+            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -126,7 +126,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Find KB solutions for a Prometheus/OpenShift alert name.")
     public Uni<ToolResponse> findSolutionForAlert(
             @ToolArg(description = "Alert name (e.g., 'KubePodCrashLooping')") String alertName,
-            @ToolArg(description = "Product (default: OpenShift)") String product) {
+            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -157,7 +157,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Search Red Hat documentation for how-to guides and best practices.")
     public Uni<ToolResponse> searchDocumentation(
             @ToolArg(description = "Topic to search") String topic,
-            @ToolArg(description = "Product (default: OpenShift)") String product) {
+            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -204,5 +204,17 @@ public class KnowledgeBaseTools {
         return (detail == null || detail.isBlank())
                 ? "Error: " + message
                 : "Error: " + message + " - " + detail;
+    }
+
+    private int parseMaxResults(String maxResultsStr) {
+        if (maxResultsStr == null || maxResultsStr.isBlank()) {
+            return DEFAULT_MAX_RESULTS;
+        }
+        try {
+            int value = Integer.parseInt(maxResultsStr.trim());
+            return Math.max(MIN_RESULTS, Math.min(MAX_RESULTS, value));
+        } catch (NumberFormatException e) {
+            return DEFAULT_MAX_RESULTS;
+        }
     }
 }
