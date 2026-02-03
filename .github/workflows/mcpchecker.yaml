@@ -102,8 +102,8 @@ jobs:
           # Start server in SSE mode on port 9081
           java -jar target/quarkus-app/quarkus-run.jar &
           sleep 10
-          # Verify server is running
-          curl -s http://localhost:9081/mcp/sse || echo "Server may need more time to start"
+          # Verify server is running (use timeout since SSE endpoint stays open)
+          curl -s --max-time 2 http://localhost:9081/q/health/ready || echo "Server may need more time to start"
         env:
           REDHAT_TOKEN: ${{ secrets.REDHAT_TOKEN }}
 
