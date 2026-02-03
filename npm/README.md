@@ -25,9 +25,9 @@ export REDHAT_TOKEN="your-offline-token"
 
 Get your token at: https://access.redhat.com/management/api
 
-### Claude Code
+### MCP Client Configuration
 
-Add to `~/.claude/settings.json`:
+Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 
 ```json
 {
@@ -51,7 +51,7 @@ Add to `~/.claude/settings.json`:
 ## Usage
 
 ```bash
-# stdio mode (for Claude Code)
+# stdio mode (default)
 npx mcp-redhat-kb
 
 # SSE mode

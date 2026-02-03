@@ -21,5 +21,5 @@ public final class KnowledgeBaseConstants {
     public static final int MAX_RESULTS = 50;
 
     // Default values
-    public static final String DEFAULT_PRODUCT = "OpenShift";
+    public static final String DEFAULT_PRODUCT = "Red Hat OpenShift Container Platform";
 }

@@ -16,7 +16,7 @@ This server supports two MCP transport modes:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **stdio** | Standard input/output communication | Default for Claude Desktop, Claude Code, Cursor, VS Code |
+| **stdio** | Standard input/output communication | Default for VS Code, Cursor, Windsurf |
 | **SSE** | Server-Sent Events over HTTP | Standalone server, web integrations, multiple clients |
 
 ## Table of Contents
@@ -41,33 +41,15 @@ This server supports two MCP transport modes:
 
 ## Installation
 
-### Quick Install (Claude Code CLI)
+### npx
 
 ```bash
-claude mcp add redhat-kb -e REDHAT_TOKEN="your-token-here" -- npx -y mcp-redhat-kb@latest
+npx -y mcp-redhat-kb@latest
 ```
 
-### Claude Code
+### MCP Client Configuration
 
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "redhat-kb": {
-      "command": "npx",
-      "args": ["-y", "mcp-redhat-kb@latest"],
-      "env": {
-        "REDHAT_TOKEN": "your-token-here"
-      }
-    }
-  }
-}
-```
-
-### Claude Desktop
-
-Add to `claude_desktop_config.json`:
+Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 
 ```json
 {

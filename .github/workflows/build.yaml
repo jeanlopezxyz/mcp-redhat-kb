@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths-ignore:
+      - '.gitignore'
+      - 'LICENSE'
+      - '*.md'
+  pull_request:
+    paths-ignore:
+      - '.gitignore'
+      - 'LICENSE'
+      - '*.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+      - name: Build
+        run: ./mvnw package -DskipTests
+      - name: Test
+        run: ./mvnw test

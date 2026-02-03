@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jeanlopezxyz/mcp-redhat-kb",
+  "description": "A Model Context Protocol (MCP) server for searching the Red Hat Knowledge Base",
+  "repository": {
+    "url": "https://github.com/jeanlopezxyz/mcp-redhat-kb",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "mcp-redhat-kb",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

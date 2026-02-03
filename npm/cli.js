@@ -55,14 +55,14 @@ ENVIRONMENT:
                          Generate at: https://access.redhat.com/management/api
 
 EXAMPLES:
-  # stdio mode (for Claude Code, Claude Desktop)
+  # stdio mode (default)
   npx mcp-redhat-kb
 
   # SSE mode on port 9081
   npx mcp-redhat-kb --port 9081
 
-CLAUDE CODE CONFIGURATION:
-  Add to ~/.claude/settings.json:
+MCP CLIENT CONFIGURATION:
+  Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 
   {
     "mcpServers": {

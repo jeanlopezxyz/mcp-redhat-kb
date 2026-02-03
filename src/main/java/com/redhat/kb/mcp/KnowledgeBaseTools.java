@@ -37,7 +37,7 @@ public class KnowledgeBaseTools {
     public Uni<ToolResponse> searchKnowledgeBase(
             @ToolArg(description = "Search keywords") String query,
             @ToolArg(description = "Max results 1-50 (default: 10)", defaultValue = "") String maxResultsStr,
-            @ToolArg(description = "Product filter: 'OpenShift', 'RHEL' (default: OpenShift)", defaultValue = "") String product,
+            @ToolArg(description = "Product filter: 'Red Hat OpenShift Container Platform', 'Red Hat Enterprise Linux' (default: Red Hat OpenShift Container Platform)", defaultValue = "") String product,
             @ToolArg(description = "Type: 'Solution', 'Documentation', 'Article'", defaultValue = "") String documentType) {
 
         return Uni.createFrom().item(() -> {
@@ -95,7 +95,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Search for solutions to an error message. Optimized for troubleshooting.")
     public Uni<ToolResponse> troubleshootError(
             @ToolArg(description = "Error message") String errorMessage,
-            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
+            @ToolArg(description = "Product (default: Red Hat OpenShift Container Platform)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -126,7 +126,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Find KB solutions for a Prometheus/OpenShift alert name.")
     public Uni<ToolResponse> findSolutionForAlert(
             @ToolArg(description = "Alert name (e.g., 'KubePodCrashLooping')") String alertName,
-            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
+            @ToolArg(description = "Product (default: Red Hat OpenShift Container Platform)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
@@ -157,7 +157,7 @@ public class KnowledgeBaseTools {
     @Tool(description = "Search Red Hat documentation for how-to guides and best practices.")
     public Uni<ToolResponse> searchDocumentation(
             @ToolArg(description = "Topic to search") String topic,
-            @ToolArg(description = "Product (default: OpenShift)", defaultValue = "") String product) {
+            @ToolArg(description = "Product (default: Red Hat OpenShift Container Platform)", defaultValue = "") String product) {
 
         return Uni.createFrom().item(() -> {
             if (!kbService.isConfigured()) {
