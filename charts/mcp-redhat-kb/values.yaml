@@ -1,0 +1,111 @@
+# -- Enable OpenShift specific features
+openshift: false
+
+# -- This will set the replicaset count
+replicaCount: 1
+
+# -- Container image configuration
+image:
+  registry: ghcr.io
+  repository: jeanlopezxyz/mcp-redhat-kb
+  version: latest
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# -- Pod annotations
+podAnnotations: {}
+# -- Pod labels
+podLabels: {}
+
+# -- Default Pod Security Context
+defaultPodSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+podSecurityContext: {}
+
+# -- Default Container Security Context
+defaultSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+
+securityContext: {}
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# -- Ingress configuration (for Kubernetes Ingress or OpenShift Route)
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: ImplementationSpecific
+  termination: edge
+  tls: {}
+
+# -- Resource requests and limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# -- Liveness and readiness probes
+# Quarkus health endpoints
+livenessProbe:
+  httpGet:
+    path: /q/health/live
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /q/health/ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+# -- Additional volumes
+extraVolumes: []
+# -- Additional volume mounts
+extraVolumeMounts: []
+# -- Additional containers (sidecars)
+extraContainers: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Red Hat API configuration
+redhat:
+  # -- Name of existing secret containing REDHAT_TOKEN
+  # -- If not set, a new secret will be created using redhat.token
+  existingSecret: ""
+  # -- Red Hat API token (only used if existingSecret is not set)
+  # -- WARNING: Setting this in values.yaml is not recommended for production
+  # -- Use existingSecret or --set redhat.token=xxx instead
+  token: ""
+
+# -- Server configuration
+server:
+  # -- HTTP port for the server
+  port: "8080"

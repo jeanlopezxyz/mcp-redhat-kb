@@ -1,0 +1,13 @@
+apiVersion: v2
+name: mcp-redhat-kb
+description: Helm Chart for the Red Hat Knowledge Base MCP Server
+home: https://github.com/jeanlopezxyz/mcp-redhat-kb
+keywords:
+  - redhat
+  - knowledge-base
+  - mcp
+  - quarkus
+maintainers:
+  - name: Jean Lopez
+version: 0.1.0
+appVersion: "latest"

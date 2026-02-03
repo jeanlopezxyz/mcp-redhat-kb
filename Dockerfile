@@ -36,10 +36,11 @@ RUN ./mvnw package -DskipTests -B
 # Stage 2: Runtime
 FROM registry.access.redhat.com/ubi9/openjdk-21:1.21
 
-LABEL maintainer="Jean Lopez"
-LABEL description="MCP Server for Red Hat Knowledge Base (JVM)"
+LABEL io.modelcontextprotocol.server.name="io.github.jeanlopezxyz/mcp-redhat-kb"
 LABEL io.k8s.display-name="MCP Red Hat Knowledge Base Server"
 LABEL io.openshift.tags="mcp,redhat,knowledge-base,kb,quarkus"
+LABEL maintainer="Jean Lopez"
+LABEL description="MCP Server for Red Hat Knowledge Base (JVM)"
 
 # Copy the built application from build stage
 COPY --from=build --chown=185 /build/target/quarkus-app/lib/ /deployments/lib/
