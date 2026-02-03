@@ -254,6 +254,57 @@ REDHAT_TOKEN="your-token" npx mcp-redhat-kb --port 9081
 
 ---
 
+## Kubernetes / OpenShift Deployment
+
+### Container Image
+
+The container image is available on GitHub Container Registry:
+
+```
+ghcr.io/jeanlopezxyz/mcp-redhat-kb:latest
+```
+
+### Helm Chart
+
+Deploy using the included Helm chart:
+
+```bash
+# Create secret with Red Hat token
+kubectl create secret generic mcp-redhat-kb-secrets \
+  --namespace mcp-servers \
+  --from-literal=REDHAT_TOKEN=your-token-here
+
+# Deploy with Helm
+helm upgrade --install mcp-redhat-kb ./charts/mcp-redhat-kb \
+  --namespace mcp-servers \
+  --create-namespace \
+  --set openshift=true \
+  --set redhat.existingSecret=mcp-redhat-kb-secrets
+```
+
+#### Helm Values
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `image.registry` | Container registry | `ghcr.io` |
+| `image.repository` | Image repository | `jeanlopezxyz/mcp-redhat-kb` |
+| `image.version` | Image tag | `latest` |
+| `openshift` | Enable OpenShift Routes | `false` |
+| `service.port` | Service port | `8080` |
+| `redhat.existingSecret` | Name of existing secret with REDHAT_TOKEN | `""` |
+| `redhat.token` | Red Hat API token (if not using existingSecret) | `""` |
+
+#### Example with inline token (not recommended for production)
+
+```bash
+helm upgrade --install mcp-redhat-kb ./charts/mcp-redhat-kb \
+  --namespace mcp-servers \
+  --set openshift=true \
+  --set redhat.token=your-token-here
+```
+
+---
+
 ## Related Projects
 
 - [mcp-redhat-cases](https://github.com/jeanlopezxyz/mcp-redhat-cases) - MCP Server for Red Hat Support Cases
