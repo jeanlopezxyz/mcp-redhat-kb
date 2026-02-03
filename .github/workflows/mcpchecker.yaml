@@ -1,15 +1,10 @@
 name: mcpchecker MCP Evaluation
 
 on:
-  # Weekly schedule - runs every Monday at 9 AM UTC
   schedule:
     - cron: '0 9 * * 1'
-
-  # Manual trigger via PR comments
   issue_comment:
     types: [created]
-
-  # Allow manual workflow dispatch for testing
   workflow_dispatch:
     inputs:
       task-filter:
@@ -32,6 +27,7 @@ concurrency:
 
 env:
   JAVA_VERSION: '21'
+  MCPCHECKER_VERSION: 'v0.0.4'
 
 defaults:
   run:
@@ -49,7 +45,6 @@ jobs:
        contains(github.event.comment.body, '/run-mcpchecker'))
     outputs:
       should-run: ${{ steps.check.outputs.should-run }}
-      pr-number: ${{ steps.check.outputs.pr-number }}
       pr-sha: ${{ steps.check.outputs.pr-sha }}
       is-pr: ${{ steps.check.outputs.is-pr }}
     steps:
@@ -60,13 +55,10 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
             PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" --jq '.permission')
-
             if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "write" ]]; then
               echo "should-run=true" >> $GITHUB_OUTPUT
               echo "is-pr=true" >> $GITHUB_OUTPUT
-              PR_NUMBER="${{ github.event.issue.number }}"
-              echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
-              PR_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid')
+              PR_SHA=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid')
               echo "pr-sha=$PR_SHA" >> $GITHUB_OUTPUT
             else
               echo "should-run=false" >> $GITHUB_OUTPUT
@@ -97,28 +89,47 @@ jobs:
       - name: Build MCP server
         run: ./mvnw package -DskipTests -B
 
+      - name: Download mcpchecker
+        run: |
+          curl -sL "https://github.com/mcpchecker/mcpchecker/releases/download/${{ env.MCPCHECKER_VERSION }}/mcpchecker_Linux_x86_64.zip" -o mcpchecker.zip
+          unzip mcpchecker.zip
+          chmod +x mcpchecker
+          ./mcpchecker version
+
       - name: Start MCP server
         run: |
-          java -jar target/quarkus-app/quarkus-run.jar --port 9081 &
+          # Start server in SSE mode on port 9081
+          java -jar target/quarkus-app/quarkus-run.jar &
           sleep 10
+          # Verify server is running
+          curl -s http://localhost:9081/mcp/sse || echo "Server may need more time to start"
         env:
           REDHAT_TOKEN: ${{ secrets.REDHAT_TOKEN }}
 
       - name: Run mcpchecker evaluation
         id: mcpchecker
-        uses: mcpchecker/mcpchecker/.github/actions/mcpchecker-action@v0.0.4
-        with:
-          eval-config: 'evals/openai-agent/eval.yaml'
-          mcpchecker-version: 'latest'
-          task-filter: ${{ github.event.inputs.task-filter || '' }}
-          output-format: 'json'
-          verbose: ${{ github.event.inputs.verbose || 'false' }}
-          upload-artifacts: 'true'
-          artifact-name: 'mcpchecker-results'
-          fail-on-error: 'false'
-          task-pass-threshold: '0.8'
-          assertion-pass-threshold: '0.8'
-          working-directory: '.'
+        run: |
+          TASK_FILTER="${{ github.event.inputs.task-filter }}"
+          VERBOSE="${{ github.event.inputs.verbose }}"
+
+          ARGS="check evals/openai-agent/eval.yaml --output-format json"
+
+          if [[ -n "$TASK_FILTER" ]]; then
+            ARGS="$ARGS --task-filter $TASK_FILTER"
+          fi
+
+          if [[ "$VERBOSE" == "true" ]]; then
+            ARGS="$ARGS --verbose"
+          fi
+
+          echo "Running: ./mcpchecker $ARGS"
+          ./mcpchecker $ARGS | tee mcpchecker-results.json || true
+
+          # Extract results for summary
+          if [[ -f mcpchecker-results.json ]]; then
+            echo "## mcpchecker Results" >> $GITHUB_STEP_SUMMARY
+            cat mcpchecker-results.json >> $GITHUB_STEP_SUMMARY
+          fi
         env:
           MODEL_BASE_URL: ${{ secrets.MODEL_BASE_URL }}
           MODEL_KEY: ${{ secrets.MODEL_KEY }}
@@ -126,32 +137,14 @@ jobs:
           JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
           JUDGE_MODEL_NAME: ${{ secrets.JUDGE_MODEL_NAME }}
 
-      - name: Cleanup
+      - name: Upload results
         if: always()
-        run: |
-          pkill -f quarkus-run.jar || true
-
-      - name: Save evaluation context
-        if: always() && needs.check-trigger.outputs.is-pr == 'true'
-        run: |
-          mkdir -p eval-context
-          cat > eval-context/context.json << EOF
-          {
-            "pr_number": "${{ needs.check-trigger.outputs.pr-number }}",
-            "pr_sha": "${{ needs.check-trigger.outputs.pr-sha }}",
-            "tasks_passed": "${{ steps.mcpchecker.outputs.tasks-passed }}",
-            "tasks_total": "${{ steps.mcpchecker.outputs.tasks-total }}",
-            "task_pass_rate": "${{ steps.mcpchecker.outputs.task-pass-rate }}",
-            "assertions_passed": "${{ steps.mcpchecker.outputs.assertions-passed }}",
-            "assertions_total": "${{ steps.mcpchecker.outputs.assertions-total }}",
-            "passed": "${{ steps.mcpchecker.outputs.passed }}"
-          }
-          EOF
-
-      - name: Upload PR context
-        if: always() && needs.check-trigger.outputs.is-pr == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: eval-context
-          path: eval-context/
-          retention-days: 1
+          name: mcpchecker-results
+          path: mcpchecker-results.json
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: pkill -f quarkus-run.jar || true
