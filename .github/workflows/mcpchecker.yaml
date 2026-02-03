@@ -95,7 +95,7 @@ jobs:
           unzip mcpchecker.zip
           mv mcpchecker-linux-amd64 mcpchecker
           chmod +x mcpchecker
-          ./mcpchecker version
+          ./mcpchecker --help | head -1
 
       - name: Start MCP server
         run: |
