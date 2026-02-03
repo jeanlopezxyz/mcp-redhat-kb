@@ -1,0 +1,157 @@
+name: mcpchecker MCP Evaluation
+
+on:
+  # Weekly schedule - runs every Monday at 9 AM UTC
+  schedule:
+    - cron: '0 9 * * 1'
+
+  # Manual trigger via PR comments
+  issue_comment:
+    types: [created]
+
+  # Allow manual workflow dispatch for testing
+  workflow_dispatch:
+    inputs:
+      task-filter:
+        description: 'Regular expression to filter tasks (optional)'
+        required: false
+        default: ''
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'issue_comment' && format('pr-{0}', github.event.issue.number) || github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '21'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-trigger:
+    name: Check if evaluation should run
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/run-mcpchecker'))
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+      pr-number: ${{ steps.check.outputs.pr-number }}
+      pr-sha: ${{ steps.check.outputs.pr-sha }}
+      is-pr: ${{ steps.check.outputs.is-pr }}
+    steps:
+      - name: Check trigger conditions
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" --jq '.permission')
+
+            if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "write" ]]; then
+              echo "should-run=true" >> $GITHUB_OUTPUT
+              echo "is-pr=true" >> $GITHUB_OUTPUT
+              PR_NUMBER="${{ github.event.issue.number }}"
+              echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+              PR_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid')
+              echo "pr-sha=$PR_SHA" >> $GITHUB_OUTPUT
+            else
+              echo "should-run=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "is-pr=false" >> $GITHUB_OUTPUT
+            echo "pr-sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+  run-evaluation:
+    name: Run MCP Evaluation
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-trigger.outputs.pr-sha }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Build MCP server
+        run: ./mvnw package -DskipTests -B
+
+      - name: Start MCP server
+        run: |
+          java -jar target/quarkus-app/quarkus-run.jar --port 9081 &
+          sleep 10
+        env:
+          REDHAT_TOKEN: ${{ secrets.REDHAT_TOKEN }}
+
+      - name: Run mcpchecker evaluation
+        id: mcpchecker
+        uses: mcpchecker/mcpchecker/.github/actions/mcpchecker-action@v0.0.4
+        with:
+          eval-config: 'evals/openai-agent/eval.yaml'
+          mcpchecker-version: 'latest'
+          task-filter: ${{ github.event.inputs.task-filter || '' }}
+          output-format: 'json'
+          verbose: ${{ github.event.inputs.verbose || 'false' }}
+          upload-artifacts: 'true'
+          artifact-name: 'mcpchecker-results'
+          fail-on-error: 'false'
+          task-pass-threshold: '0.8'
+          assertion-pass-threshold: '0.8'
+          working-directory: '.'
+        env:
+          MODEL_BASE_URL: ${{ secrets.MODEL_BASE_URL }}
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+          JUDGE_BASE_URL: ${{ secrets.JUDGE_BASE_URL }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+          JUDGE_MODEL_NAME: ${{ secrets.JUDGE_MODEL_NAME }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f quarkus-run.jar || true
+
+      - name: Save evaluation context
+        if: always() && needs.check-trigger.outputs.is-pr == 'true'
+        run: |
+          mkdir -p eval-context
+          cat > eval-context/context.json << EOF
+          {
+            "pr_number": "${{ needs.check-trigger.outputs.pr-number }}",
+            "pr_sha": "${{ needs.check-trigger.outputs.pr-sha }}",
+            "tasks_passed": "${{ steps.mcpchecker.outputs.tasks-passed }}",
+            "tasks_total": "${{ steps.mcpchecker.outputs.tasks-total }}",
+            "task_pass_rate": "${{ steps.mcpchecker.outputs.task-pass-rate }}",
+            "assertions_passed": "${{ steps.mcpchecker.outputs.assertions-passed }}",
+            "assertions_total": "${{ steps.mcpchecker.outputs.assertions-total }}",
+            "passed": "${{ steps.mcpchecker.outputs.passed }}"
+          }
+          EOF
+
+      - name: Upload PR context
+        if: always() && needs.check-trigger.outputs.is-pr == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: eval-context
+          path: eval-context/
+          retention-days: 1

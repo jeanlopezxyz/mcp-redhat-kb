@@ -1,0 +1,5 @@
+mcpServers:
+  redhat-kb:
+    type: http
+    url: http://localhost:9081/mcp/sse
+    enableAllTools: true

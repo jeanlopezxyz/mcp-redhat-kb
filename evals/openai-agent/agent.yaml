@@ -1,0 +1,6 @@
+builtin:
+  type: "openai-agent"
+  model: "gpt-4"
+  env:
+    baseUrlKey: MODEL_BASE_URL
+    apiKeyKey: MODEL_KEY

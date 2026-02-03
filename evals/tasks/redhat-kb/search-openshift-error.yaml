@@ -1,0 +1,9 @@
+kind: Task
+metadata:
+  name: "search-openshift-error"
+prompt: "Search the Red Hat Knowledge Base for solutions to CrashLoopBackOff errors in OpenShift pods"
+assertions:
+  toolsUsed:
+    - server: redhat-kb
+      toolPattern: "(searchKnowledgeBase|troubleshootError|findSolutionForAlert)"
+  minToolCalls: 1
