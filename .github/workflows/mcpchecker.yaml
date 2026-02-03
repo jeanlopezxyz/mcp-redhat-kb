@@ -93,6 +93,7 @@ jobs:
         run: |
           curl -sL "https://github.com/mcpchecker/mcpchecker/releases/download/${{ env.MCPCHECKER_VERSION }}/mcpchecker-linux-amd64.zip" -o mcpchecker.zip
           unzip mcpchecker.zip
+          mv mcpchecker-linux-amd64 mcpchecker
           chmod +x mcpchecker
           ./mcpchecker version
 
