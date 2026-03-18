@@ -37,6 +37,7 @@ jobs:
   check-trigger:
     name: Check if evaluation should run
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: |
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
@@ -52,13 +53,18 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
-            PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" --jq '.permission')
+          if [[ "$EVENT_NAME" == "issue_comment" ]]; then
+            PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_USER/permission" --jq '.permission')
             if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "write" ]]; then
               echo "should-run=true" >> $GITHUB_OUTPUT
               echo "is-pr=true" >> $GITHUB_OUTPUT
-              PR_SHA=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid')
+              PR_SHA=$(gh pr view "$ISSUE_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
               echo "pr-sha=$PR_SHA" >> $GITHUB_OUTPUT
             else
               echo "should-run=false" >> $GITHUB_OUTPUT
@@ -66,7 +72,7 @@ jobs:
           else
             echo "should-run=true" >> $GITHUB_OUTPUT
             echo "is-pr=false" >> $GITHUB_OUTPUT
-            echo "pr-sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "pr-sha=$SHA" >> $GITHUB_OUTPUT
           fi
 
   run-evaluation:
@@ -74,14 +80,15 @@ jobs:
     needs: check-trigger
     if: needs.check-trigger.outputs.should-run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ needs.check-trigger.outputs.pr-sha }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
@@ -101,18 +108,22 @@ jobs:
         run: |
           # Start server in SSE mode on port 9081
           java -jar target/quarkus-app/quarkus-run.jar &
-          sleep 10
-          # Verify server is running (use timeout since SSE endpoint stays open)
-          curl -s --max-time 2 http://localhost:9081/q/health/ready || echo "Server may need more time to start"
+          # Wait for server to be ready
+          timeout 30 bash -c 'until curl -sf http://localhost:9081/q/health/ready; do sleep 1; done'
         env:
           REDHAT_TOKEN: ${{ secrets.REDHAT_TOKEN }}
 
       - name: Run mcpchecker evaluation
         id: mcpchecker
+        env:
+          TASK_FILTER: ${{ github.event.inputs.task-filter }}
+          VERBOSE: ${{ github.event.inputs.verbose }}
+          MODEL_BASE_URL: ${{ secrets.MODEL_BASE_URL }}
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+          JUDGE_BASE_URL: ${{ secrets.JUDGE_BASE_URL }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+          JUDGE_MODEL_NAME: ${{ secrets.JUDGE_MODEL_NAME }}
         run: |
-          TASK_FILTER="${{ github.event.inputs.task-filter }}"
-          VERBOSE="${{ github.event.inputs.verbose }}"
-
           ARGS="check evals/openai-agent/eval.yaml --output-format json"
 
           if [[ -n "$TASK_FILTER" ]]; then
@@ -131,16 +142,10 @@ jobs:
             echo "## mcpchecker Results" >> $GITHUB_STEP_SUMMARY
             cat mcpchecker-results.json >> $GITHUB_STEP_SUMMARY
           fi
-        env:
-          MODEL_BASE_URL: ${{ secrets.MODEL_BASE_URL }}
-          MODEL_KEY: ${{ secrets.MODEL_KEY }}
-          JUDGE_BASE_URL: ${{ secrets.JUDGE_BASE_URL }}
-          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
-          JUDGE_MODEL_NAME: ${{ secrets.JUDGE_MODEL_NAME }}
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mcpchecker-results
           path: mcpchecker-results.json
