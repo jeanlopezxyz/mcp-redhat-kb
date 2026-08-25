@@ -76,30 +76,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Human-readable pass first: SARIF alone reports only an exit code in the log, which
-      # leaves a failing gate with nothing to act on.
-      - name: Report vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
-        with:
-          image-ref: mcp-redhat-kb:scan
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          format: table
-          exit-code: '0'
-          ignore-unfixed: true
-
+      # Run through the CLI rather than the action: a single invocation both prints the
+      # findings and writes SARIF, and it reads the image straight from the local daemon.
+      # Two action steps over the same local image do not work -- the second resolves the
+      # reference remotely and fails on an image that has not been pushed yet.
+      #
+      # Vulnerabilities only. The secret scanner flags the placeholder credentials shipped
+      # in the base image's /etc/maven/settings.xml ("proxypass", "repopwd"), which would
+      # block the gate on findings that are not secrets.
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
-        with:
-          image-ref: mcp-redhat-kb:scan
-          # Vulnerabilities only: the secret scanner flags placeholder values in the
-          # packaged configuration and would block the gate on findings that are not.
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          format: sarif
-          output: trivy.sarif
-          exit-code: '1'
-          ignore-unfixed: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:0.69.3 image \
+              --scanners vuln \
+              --severity CRITICAL,HIGH \
+              --ignore-unfixed \
+              --format table \
+              mcp-redhat-kb:scan
+
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:0.69.3 image \
+              --scanners vuln \
+              --severity CRITICAL,HIGH \
+              --ignore-unfixed \
+              --format sarif \
+              --output trivy.sarif \
+              --exit-code 1 \
+              mcp-redhat-kb:scan
 
       # Only reached when the scan passes. Layers are cached from the build above, so this
       # republishes rather than rebuilds.
