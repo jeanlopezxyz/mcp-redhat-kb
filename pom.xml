@@ -6,15 +6,21 @@
     <version>1.0.0</version>
 
     <properties>
-        <compiler-plugin.version>3.14.1</compiler-plugin.version>
-        <maven.compiler.release>21</maven.compiler.release>
+        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.30.2</quarkus.platform.version>
+        <!-- 3.33.x is the current LTS line; 3.33.3.1 carries the security fixes
+             for CVE-2026-39852 (quarkus-vertx-http authorization bypass). -->
+        <quarkus.platform.version>3.33.3.1</quarkus.platform.version>
+        <!-- 2.0.0.CR2 implements MCP specification 2026-07-28 (stateless core,
+             server/discover) and is built against Quarkus 3.33.3.1. -->
+        <quarkus-mcp-server.version>2.0.0.CR2</quarkus-mcp-server.version>
+        <jsoup.version>1.21.2</jsoup.version>
         <skipITs>true</skipITs>
-        <surefire-plugin.version>3.5.4</surefire-plugin.version>
+        <surefire-plugin.version>3.5.6</surefire-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -41,20 +47,57 @@
         <dependency>
             <groupId>io.quarkiverse.mcp</groupId>
             <artifactId>quarkus-mcp-server-http</artifactId>
-            <version>1.9.0</version>
+            <version>${quarkus-mcp-server.version}</version>
         </dependency>
         <dependency>
             <groupId>io.quarkiverse.mcp</groupId>
             <artifactId>quarkus-mcp-server-stdio</artifactId>
-            <version>1.9.0</version>
+            <version>${quarkus-mcp-server.version}</version>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-rest-client-jackson</artifactId>
+            <artifactId>quarkus-cache</artifactId>
+        </dependency>
+        <!-- OAuth 2.1 Resource Server (Keycloak). The MCP specification requires an
+             authenticated HTTP transport to validate bearer tokens and publish
+             Protected Resource Metadata (RFC 9728). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
+        </dependency>
+        <!-- Emits the MCP-conformant WWW-Authenticate challenge pointing at the
+             resource metadata document. -->
+        <dependency>
+            <groupId>io.quarkiverse.mcp</groupId>
+            <artifactId>quarkus-mcp-server-oidc</artifactId>
+            <version>${quarkus-mcp-server.version}</version>
+        </dependency>
+        <!-- Strips HTML from Knowledge Base article bodies before they reach the model -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- McpAssured: drives the server over the real MCP protocol in tests -->
+        <dependency>
+            <groupId>io.quarkiverse.mcp</groupId>
+            <artifactId>quarkus-mcp-server-test</artifactId>
+            <version>${quarkus-mcp-server.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

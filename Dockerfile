@@ -11,7 +11,7 @@
 # =============================================================================
 
 # Stage 1: Build
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.21 AS build
+FROM registry.access.redhat.com/ubi9/openjdk-25:1.24 AS build
 
 USER root
 RUN microdnf install -y gzip tar && microdnf clean all
@@ -30,11 +30,11 @@ RUN ./mvnw dependency:go-offline -B
 # Copy source code
 COPY --chown=185 src src
 
-# Build the application
-RUN ./mvnw package -DskipTests -B
+# Build the application, running the unit tests as a gate
+RUN ./mvnw package -B
 
 # Stage 2: Runtime
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.21
+FROM registry.access.redhat.com/ubi9/openjdk-25:1.24
 
 LABEL io.modelcontextprotocol.server.name="io.github.jeanlopezxyz/mcp-redhat-kb"
 LABEL io.k8s.display-name="MCP Red Hat Knowledge Base Server"
@@ -52,7 +52,12 @@ EXPOSE 9081
 
 USER 185
 
-ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Dquarkus.http.port=9081 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
-ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+# The application defaults to binding 127.0.0.1; inside a container the port must be
+# reachable from outside the network namespace, so it is widened here. The access boundary
+# is then the pod and its NetworkPolicy - do not publish this port without one.
+ENV QUARKUS_HTTP_HOST=0.0.0.0 \
+    QUARKUS_HTTP_PORT=9081
 
-ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]
+ENTRYPOINT ["java", \
+    "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", \
+    "-jar", "/deployments/quarkus-run.jar"]

@@ -1,0 +1,3 @@
+# Run `sdk env` (or enable sdkman_auto_env=true) to select the JDK this project builds with.
+# The build targets Java 25; GraalVM also provides native-image for `./mvnw package -Pnative`.
+java=25-graalce
