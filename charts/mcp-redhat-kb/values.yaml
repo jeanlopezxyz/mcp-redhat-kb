@@ -5,10 +5,13 @@ openshift: false
 replicaCount: 1
 
 # -- Container image configuration
+# `version` accepts a tag or a `sha256:...` digest. Prefer a digest, or at least a fixed
+# release tag: `latest` with IfNotPresent leaves different nodes running different builds
+# with no way to tell which. Defaults to the chart's appVersion when left empty.
 image:
   registry: ghcr.io
   repository: jeanlopezxyz/mcp-redhat-kb
-  version: latest
+  version: ""
   pullPolicy: IfNotPresent
 
 # -- Image pull secrets for private registries
@@ -35,8 +38,12 @@ defaultPodSecurityContext:
 podSecurityContext: {}
 
 # -- Default Container Security Context
+# Values set in `securityContext` below are merged over these, so overriding one key
+# no longer discards the rest of the hardening.
 defaultSecurityContext:
   allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
@@ -50,8 +57,11 @@ service:
   port: 8080
 
 # -- Ingress configuration (for Kubernetes Ingress or OpenShift Route)
+# Disabled by default: this server has no authentication of its own and holds a Red Hat
+# token, so publishing it makes that subscription usable by anyone who reaches the URL.
+# Enable it only behind an authenticating proxy, and always configure `tls`.
 ingress:
-  enabled: true
+  enabled: false
   className: ""
   annotations: {}
   host: ""
@@ -59,6 +69,13 @@ ingress:
   pathType: ImplementationSpecific
   termination: edge
   tls: {}
+
+# -- NetworkPolicy restricting who may reach the server
+# `allowedSources` follows the NetworkPolicy `from` schema. The default empty list denies
+# all ingress; add the namespace or pod selectors of your MCP clients.
+networkPolicy:
+  enabled: true
+  allowedSources: []
 
 # -- Resource requests and limits
 resources:
@@ -94,16 +111,33 @@ tolerations: []
 affinity: {}
 
 # -- Red Hat API configuration
+# This is the OUTBOUND credential: how the server reads the Knowledge Base. It is never
+# forwarded to callers, and callers' Keycloak tokens are never forwarded to Red Hat.
 redhat:
-  # -- Name of existing secret containing REDHAT_TOKEN
-  # -- If not set, a new secret will be created using redhat.token
+  # -- Require every caller to send their own Red Hat offline token in the
+  # -- X-Red-Hat-Token header. Recommended for multi-user deployments: the Knowledge Base
+  # -- is then read with each person's own entitlements and Red Hat's audit trail
+  # -- attributes calls individually, instead of everyone sharing one subscription.
+  requireUserToken: true
+  # -- Name of existing secret containing REDHAT_TOKEN. Only used as a fallback for
+  # -- callers who send no token of their own, and ignored when requireUserToken is true.
   existingSecret: ""
   # -- Red Hat API token (only used if existingSecret is not set)
-  # -- WARNING: Setting this in values.yaml is not recommended for production
-  # -- Use existingSecret or --set redhat.token=xxx instead
+  # -- WARNING: not recommended outside local testing. Use existingSecret.
   token: ""
 
-# -- Server configuration
-server:
-  # -- HTTP port for the server
-  port: "8080"
+# -- Authentication (INBOUND): who may call this server
+# Without this, anyone able to reach the Service can spend the Red Hat subscription above.
+oidc:
+  # -- Require a valid OAuth 2.1 bearer token on every MCP request
+  enabled: true
+  # -- Keycloak base URL, e.g. https://sso.example.com
+  url: ""
+  # -- Realm containing the clients
+  realm: "mcp"
+  # -- Client ID of this server; also the expected token audience (RFC 8707)
+  clientId: "mcp-redhat-kb"
+
+# -- CORS origins allowed to reach the Streamable HTTP endpoint.
+# Never use "*": it would let any website drive these tools through a user's browser.
+allowedOrigins: []

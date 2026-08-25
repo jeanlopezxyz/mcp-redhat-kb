@@ -26,6 +26,9 @@ spec:
     weight: 100
 {{- else }}
 {{- $host := required "Ingress hostname must be specified" (tpl .Values.ingress.host .) }}
+{{- if not .Values.ingress.tls }}
+{{- fail "ingress.tls must be set when ingress.enabled=true: without it the Ingress serves plaintext HTTP, exposing MCP traffic and Knowledge Base content to anyone on the path." }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

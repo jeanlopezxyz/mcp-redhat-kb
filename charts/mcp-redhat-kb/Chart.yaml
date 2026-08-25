@@ -10,4 +10,6 @@ keywords:
 maintainers:
   - name: Jean Lopez
 version: 0.1.0
-appVersion: "latest"
+# Pinned rather than "latest": the release workflow rewrites this, and a mutable tag would
+# leave nodes running different builds with no way to tell which.
+appVersion: "1.0.0"

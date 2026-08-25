@@ -63,10 +63,11 @@ Create the name of the service account to use
 Create the image path
 */}}
 {{- define "mcp-redhat-kb.image" -}}
-{{- if eq (substr 0 7 .version) "sha256:" -}}
-{{- printf "%s/%s@%s" .registry .repository .version -}}
+{{- $version := .image.version | default .chartAppVersion -}}
+{{- if eq (substr 0 7 $version) "sha256:" -}}
+{{- printf "%s/%s@%s" .image.registry .image.repository $version -}}
 {{- else -}}
-{{- printf "%s/%s:%s" .registry .repository .version -}}
+{{- printf "%s/%s:%s" .image.registry .image.repository $version -}}
 {{- end -}}
 {{- end -}}
 
