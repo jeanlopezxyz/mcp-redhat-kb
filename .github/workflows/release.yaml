@@ -117,21 +117,17 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           npm version $VERSION --no-git-tag-version --allow-same-version
 
-      # Trusted publishing (OIDC) is preferred: it needs no long-lived credential and still
-      # produces a signed provenance statement. It only works once this repository is
-      # registered as a trusted publisher for the package on npmjs.com, so fall back to the
-      # token when that is not yet the case.
+      # Publishes with NPM_TOKEN. Trusted publishing (OIDC) would avoid the long-lived
+      # credential, but it requires registering this repository as a trusted publisher for
+      # the package on npmjs.com; until that is done the registry answers 404 to the PUT.
+      # Provenance is still signed and recorded either way.
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cd npm
-          if npm publish --provenance --access public; then
-            echo "Published via trusted publishing (OIDC)."
-          elif [[ -n "$NODE_AUTH_TOKEN" ]]; then
-            echo "::warning::OIDC publish failed; falling back to NPM_TOKEN. Register this repository as a trusted publisher at https://www.npmjs.com/package/mcp-redhat-kb/access to drop the token."
-            npm publish --provenance --access public
-          else
-            echo "::error::npm publish failed and no NPM_TOKEN is configured."
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo "::error::NPM_TOKEN is not configured; cannot publish to npm."
             exit 1
           fi
+          cd npm
+          npm publish --provenance --access public
