@@ -61,6 +61,8 @@ jobs:
 
       # Built locally first so the vulnerability scan is a gate rather than a report:
       # scanning after the push would leave a flagged image already serving under `latest`.
+      # The tag deliberately carries no registry prefix, otherwise Trivy resolves it as a
+      # remote reference and fails to find an image that has not been pushed yet.
       - name: Build image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -69,7 +71,7 @@ jobs:
           platforms: linux/amd64
           push: false
           load: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: mcp-redhat-kb:scan
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -77,7 +79,7 @@ jobs:
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          image-ref: mcp-redhat-kb:scan
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy.sarif
