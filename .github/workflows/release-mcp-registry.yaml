@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   id-token: write   # Required for OIDC authentication to MCP Registry
@@ -57,9 +57,25 @@ jobs:
           echo "Updated server.json:"
           cat server.json
 
+      # Pinned and checksum-verified: this binary runs in a job holding an OIDC token that
+      # can publish under our namespace, so "whatever is latest today" is too much trust.
       - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          ARCHIVE="mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+          BASE="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          CHECKSUMS="registry_${MCP_PUBLISHER_VERSION#v}_checksums.txt"
+
+          curl -fsSL -o "$ARCHIVE" "${BASE}/${ARCHIVE}"
+          curl -fsSL -o "$CHECKSUMS" "${BASE}/${CHECKSUMS}"
+
+          grep " ${ARCHIVE}\$" "$CHECKSUMS" | sha256sum -c - \
+            || { echo "::error::mcp-publisher checksum mismatch"; exit 1; }
+
+          tar xz -f "$ARCHIVE" mcp-publisher
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc

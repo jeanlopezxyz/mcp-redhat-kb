@@ -27,6 +27,9 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      with:
+        # Keep the job token out of .git/config while packaging tools run.
+        persist-credentials: false
 
     - name: Install Helm
       uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
@@ -36,21 +39,28 @@ jobs:
     - name: Determine chart version
       id: versions
       run: |
-        CHART_VERSION=$(grep '^version:' charts/${{ env.CHART_NAME }}/Chart.yaml | awk '{print $2}')
-
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+        # On a tag the chart takes the released version, so chart and application move
+        # together. Reading it from Chart.yaml instead would republish every release under
+        # the same OCI tag, silently replacing the previous chart and leaving
+        # `helm upgrade` with nothing to detect.
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          CHART_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "::notice::Creating stable release: ${CHART_VERSION}"
+        else
+          CHART_VERSION=$(grep '^version:' charts/${{ env.CHART_NAME }}/Chart.yaml | awk '{print $2}')
           GIT_SHORT_SHA=$(git rev-parse --short HEAD)
           CHART_VERSION="${CHART_VERSION}-dev.${GIT_SHORT_SHA}"
           echo "::notice::Creating development release: ${CHART_VERSION}"
-        else
-          echo "::notice::Creating stable release: ${CHART_VERSION}"
         fi
 
         echo "chart_version=$CHART_VERSION" >> $GITHUB_OUTPUT
         echo "Chart version: $CHART_VERSION"
 
+        # Strip the leading "v": the container image is tagged from semver without it
+        # (release-image.yaml publishes 2.0.0, not v2.0.0), and the chart uses appVersion
+        # as the default image tag. Keeping the "v" here would pull a tag that never exists.
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          APP_VERSION="${GITHUB_REF#refs/tags/}"
+          APP_VERSION="${GITHUB_REF#refs/tags/v}"
         else
           APP_VERSION="latest"
         fi

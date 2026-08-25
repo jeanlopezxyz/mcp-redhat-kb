@@ -25,6 +25,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # Keep the job token out of .git/config while build tooling runs.
+          persist-credentials: false
 
       - name: Set image name to lowercase
         id: image
@@ -52,31 +55,51 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            # Manual runs are not tagged releases, so the semver patterns yield nothing and
+            # the build would fail with no tag to push. Fall back to the commit SHA.
+            type=sha,format=long,enable=${{ github.event_name == 'workflow_dispatch' }}
 
-      - name: Build and push
-        id: build
+      # Built locally first so the vulnerability scan is a gate rather than a report:
+      # scanning after the push would leave a flagged image already serving under `latest`.
+      - name: Build image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           # Note: arm64 disabled due to QEMU/Maven wrapper compatibility issues
           platforms: linux/amd64
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: false
-          sbom: false
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy.sarif
           exit-code: '1'
           ignore-unfixed: true
+
+      # Only reached when the scan passes. Layers are cached from the build above, so this
+      # republishes rather than rebuilds.
+      - name: Push image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          # Supply-chain attestations: provenance records how the image was built and the
+          # SBOM lists what is in it, so consumers can audit both.
+          provenance: mode=max
+          sbom: true
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@38b3b7bf288d49ccf58644769dc7a6afdccd05eb # v3

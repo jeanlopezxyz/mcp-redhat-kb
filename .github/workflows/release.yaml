@@ -7,11 +7,14 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a release mid-flight: a half-published tag leaves the GitHub Release
+  # created but npm unpublished.
+  cancel-in-progress: false
 
+# Permissions are granted per job rather than workflow-wide, so the npm job never holds
+# a token that can write to the repository.
 permissions:
-  contents: write
-  id-token: write  # Required for npmjs OIDC trusted publishers
+  contents: read
 
 jobs:
   # ===========================================
@@ -20,20 +23,61 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      # Required to sign the JAR's build provenance.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '25'
           cache: 'maven'
 
-      - name: Build JAR
-        run: ./mvnw package -DskipTests -Dquarkus.package.jar.type=uber-jar
+      # The tag is the single source of version truth: without this the JAR keeps whatever
+      # the committed pom says and reports a stale version through MCP serverInfo.
+      - name: Set version from tag
+        run: ./mvnw -B versions:set -DnewVersion=${GITHUB_REF_NAME#v} -DgenerateBackupPoms=false
 
-      - name: Rename JAR
-        run: mv target/*-runner.jar target/mcp-redhat-kb.jar
+      - name: Build JAR
+        run: ./mvnw package -B -Dquarkus.package.jar.type=uber-jar
+
+      # The uber-jar is only assembled here, so this is the first time its merged service
+      # files are exercised. Starting it once catches a packaging break before release.
+      - name: Smoke test the uber-jar
+        run: |
+          mv target/*-runner.jar target/mcp-redhat-kb.jar
+          REDHAT_TOKEN=smoke-test timeout 60 java \
+            -Dquarkus.http.host-enabled=false \
+            -Dquarkus.mcp.server.stdio.enabled=true \
+            -Dquarkus.banner.enabled=false \
+            -jar target/mcp-redhat-kb.jar > /tmp/smoke.json 2>/tmp/smoke.err <<'EOF' || true
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}
+          EOF
+          grep -q '"serverInfo"' /tmp/smoke.json || {
+            echo "::error::the packaged JAR did not complete an MCP handshake"
+            cat /tmp/smoke.err
+            exit 1
+          }
+          echo "Handshake OK: $(cat /tmp/smoke.json | head -c 200)"
+
+      # The npm launcher refuses to execute a JAR whose digest is not listed here, so this
+      # file is a required release asset, not an optional convenience.
+      - name: Generate checksums
+        run: |
+          cd target
+          sha256sum mcp-redhat-kb.jar > checksums.txt
+          cat checksums.txt
+
+      # Signed provenance for the JAR, so consumers can verify it was built by this
+      # workflow from this commit rather than uploaded by hand.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373b6ac4b70e50e64b944d0c9a29ea5d51d # v1
+        with:
+          subject-path: target/mcp-redhat-kb.jar
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
@@ -43,6 +87,7 @@ jobs:
           files: |
             LICENSE
             target/mcp-redhat-kb.jar
+            target/checksums.txt
 
   # ===========================================
   # Publish to npm
@@ -51,8 +96,14 @@ jobs:
     needs: build-and-release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write  # Required for npmjs OIDC trusted publishers
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # Keep the job's token out of .git/config while npm lifecycle scripts run.
+          persist-credentials: false
 
       # Ensure npm 11.5.1 or later is installed (required for https://docs.npmjs.com/trusted-publishers)
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
