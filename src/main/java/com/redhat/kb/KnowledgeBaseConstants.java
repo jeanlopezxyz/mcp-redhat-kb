@@ -9,17 +9,27 @@ public final class KnowledgeBaseConstants {
         // Utility class
     }
 
-    // Error messages
-    public static final String ERROR_NOT_CONFIGURED = "Error: REDHAT_TOKEN not configured";
-
     // Input limits
     public static final int MAX_QUERY_LENGTH = 1000;
 
     // Result limits
     public static final int DEFAULT_MAX_RESULTS = 10;
     public static final int MIN_RESULTS = 1;
-    public static final int MAX_RESULTS = 50;
+    // Capped at 25: each rendered result costs roughly 110-150 tokens, so a larger page
+    // would spend several thousand tokens of the client's context on a single call.
+    public static final int MAX_RESULTS = 25;
 
-    // Default values
-    public static final String DEFAULT_PRODUCT = "Red Hat OpenShift Container Platform";
+    // Output limits, in characters, applied before content reaches the model.
+    /** Per-section cap in the detailed article view. */
+    public static final int MAX_SECTION_CHARS = 4000;
+    /** Overall cap for a single article, roughly 4-5k tokens. */
+    public static final int MAX_ARTICLE_CHARS = 15000;
+    /** Abstract length in search result summaries. */
+    public static final int MAX_SUMMARY_CHARS = 150;
+
+    /** Prefix of the marker appended to truncated content; also used to detect it. */
+    public static final String TRUNCATION_MARKER = "[truncated -";
+
+    /** Base URL for article links; the full URL is derivable from the article ID. */
+    public static final String ARTICLE_BASE_URL = "https://access.redhat.com/solutions/";
 }

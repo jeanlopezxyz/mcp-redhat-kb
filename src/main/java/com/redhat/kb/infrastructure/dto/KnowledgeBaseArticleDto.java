@@ -43,9 +43,6 @@ public class KnowledgeBaseArticleDto {
     @JsonProperty("lastModifiedDate")
     private String lastModifiedDate;
 
-    @JsonProperty("createdDate")
-    private String createdDate;
-
     // Getters and Setters
 
     public String getId() {
@@ -169,88 +166,6 @@ public class KnowledgeBaseArticleDto {
         this.lastModifiedDate = lastModifiedDate;
     }
 
-    public String getCreatedDate() {
-        return createdDate;
-    }
-
-    public void setCreatedDate(String createdDate) {
-        this.createdDate = createdDate;
-    }
-
-    /**
-     * Formats the article to display as a search summary.
-     */
-    public String toSearchSummary() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("ID: ").append(id).append("\n");
-        sb.append("Type: ").append(documentKind != null ? documentKind : "N/A").append("\n");
-        sb.append("Title: ").append(title).append("\n");
-        sb.append("URL: ").append(viewUri).append("\n");
-        if (product != null && !product.isEmpty()) {
-            sb.append("Products: ").append(String.join(", ", product)).append("\n");
-        }
-        if (abstractText != null && !abstractText.isEmpty()) {
-            String truncated = abstractText.length() > 200
-                ? abstractText.substring(0, 200) + "..."
-                : abstractText;
-            sb.append("Summary: ").append(truncated).append("\n");
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Formats the article with full solution content.
-     */
-    public String toDetailedString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("=== ").append(documentKind != null ? documentKind : "Article").append(" ===\n\n");
-        sb.append("ID: ").append(id).append("\n");
-        sb.append("Title: ").append(title).append("\n");
-        sb.append("URL: ").append(viewUri).append("\n");
-
-        if (product != null && !product.isEmpty()) {
-            sb.append("Products: ").append(String.join(", ", product)).append("\n");
-        }
-
-        if (solutionEnvironment != null && !solutionEnvironment.isEmpty()) {
-            sb.append("\n--- Environment ---\n");
-            for (String env : solutionEnvironment) {
-                sb.append(env).append("\n");
-            }
-        }
-
-        if (issue != null && !issue.isEmpty()) {
-            sb.append("\n--- Issue ---\n");
-            for (String iss : issue) {
-                sb.append(iss).append("\n");
-            }
-        }
-
-        if (solutionRootcause != null && !solutionRootcause.isEmpty()) {
-            sb.append("\n--- Root Cause ---\n");
-            for (String rc : solutionRootcause) {
-                sb.append(rc).append("\n");
-            }
-        }
-
-        if (solutionDiagnosticsteps != null && !solutionDiagnosticsteps.isEmpty()) {
-            sb.append("\n--- Diagnostic Steps ---\n");
-            for (String step : solutionDiagnosticsteps) {
-                sb.append(step).append("\n");
-            }
-        }
-
-        if (solutionResolution != null && !solutionResolution.isEmpty()) {
-            sb.append("\n--- Resolution ---\n");
-            for (String res : solutionResolution) {
-                sb.append(res).append("\n");
-            }
-        }
-
-        if (lastModifiedDate != null) {
-            sb.append("\nLast Modified: ").append(lastModifiedDate).append("\n");
-        }
-
-        return sb.toString();
-    }
+    // Rendering for the model lives in com.redhat.kb.mcp.ArticleFormatter: it is a
+    // presentation concern, and it needs sanitizing and truncation this DTO should not own.
 }
