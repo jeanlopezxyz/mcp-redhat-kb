@@ -2,12 +2,25 @@
 startCommand:
   type: stdio
   configSchema:
-    {}
+    type: object
+    required:
+      - redhatToken
+    properties:
+      redhatToken:
+        type: string
+        title: Red Hat API token
+        description: >-
+          Your Red Hat offline token. Generate one at
+          https://access.redhat.com/management/api. The Knowledge Base is read with your
+          own entitlements, and the token never leaves the server process.
   commandFunction:
     |-
     (config) => ({
       "command": "npx",
       "args": [
         "-y", "mcp-redhat-kb@latest"
-      ]
+      ],
+      "env": {
+        "REDHAT_TOKEN": config.redhatToken
+      }
     })
