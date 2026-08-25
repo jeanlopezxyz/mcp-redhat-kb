@@ -1,0 +1,26 @@
+# Agent that drives the evaluations.
+#
+# This is the test harness, not a dependency of the MCP server: mcpchecker starts the
+# server, hands this agent a task, and checks whether it reached the goal using the tools.
+#
+# `llm-agent` speaks the OpenAI-compatible API, which most providers implement, so
+# MODEL_BASE_URL can point at anything serving it -- OpenShift AI, vLLM, Ollama, a
+# corporate gateway, or a hosted provider. (`openai-agent` is a deprecated alias for this
+# same type and carries no tie to OpenAI as a vendor.)
+builtin:
+  type: "llm-agent"
+
+  # Must be "provider:model-id". Supported providers: openai, anthropic, gemini.
+  #
+  # To use a different model, set EVAL_MODEL and let the CI workflow rewrite this file;
+  # mcpchecker does not expand variables inside the YAML itself. Locally:
+  #   yq -i '.builtin.model = "openai:granite-3.3-8b"' evals/agent/agents.yaml
+  #
+  # A small model is the default on purpose: these evaluations check that the agent picks
+  # the right tool and reaches an answer, which does not need a frontier model, and they
+  # run on a schedule where cost accumulates.
+  model: "openai:gpt-4o-mini"
+
+  env:
+    baseUrlKey: MODEL_BASE_URL
+    apiKeyKey: MODEL_KEY

@@ -5,5 +5,5 @@ prompt: "Search the Red Hat Knowledge Base for solutions to CrashLoopBackOff err
 assertions:
   toolsUsed:
     - server: redhat-kb
-      toolPattern: "(searchKnowledgeBase|troubleshootError|findSolutionForAlert)"
+      toolPattern: "searchKnowledgeBase"
   minToolCalls: 1

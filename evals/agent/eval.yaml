@@ -1,10 +1,10 @@
 kind: Eval
 metadata:
-  name: "openai-agent-redhat-kb-test"
+  name: "redhat-kb-eval"
 config:
   agent:
     type: "file"
-    path: agent.yaml
+    path: agents.yaml
   mcpConfigFile: ../mcp-config.yaml
   llmJudge:
     env:

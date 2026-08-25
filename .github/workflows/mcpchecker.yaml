@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  JAVA_VERSION: '21'
+  JAVA_VERSION: '25'
   MCPCHECKER_VERSION: 'v0.0.4'
 
 defaults:
@@ -118,24 +118,39 @@ jobs:
         env:
           TASK_FILTER: ${{ github.event.inputs.task-filter }}
           VERBOSE: ${{ github.event.inputs.verbose }}
+          # Model driving the evaluations, as "provider:model-id". Configure the EVAL_MODEL
+          # repository variable to point at your own endpoint (for example an OpenShift AI
+          # deployment); the agent file's default applies when it is unset.
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
           MODEL_BASE_URL: ${{ secrets.MODEL_BASE_URL }}
           MODEL_KEY: ${{ secrets.MODEL_KEY }}
           JUDGE_BASE_URL: ${{ secrets.JUDGE_BASE_URL }}
           JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
           JUDGE_MODEL_NAME: ${{ secrets.JUDGE_MODEL_NAME }}
         run: |
-          ARGS="check evals/openai-agent/eval.yaml --output-format json"
+          # mcpchecker does not expand variables inside its YAML, so the override is
+          # applied to the file before the run. yq edits the document structurally, so a
+          # value containing a colon cannot corrupt the file.
+          if [[ -n "$EVAL_MODEL" ]]; then
+            echo "::notice::Using eval model $EVAL_MODEL"
+            yq -i ".builtin.model = \"${EVAL_MODEL}\"" evals/agent/agents.yaml
+          fi
+          echo "Eval model: $(yq '.builtin.model' evals/agent/agents.yaml)"
+
+          # Built as an array: a filter carrying spaces or globs must reach the binary as
+          # one argument rather than being re-split by the shell.
+          args=(check evals/agent/eval.yaml --output-format json)
 
           if [[ -n "$TASK_FILTER" ]]; then
-            ARGS="$ARGS --task-filter $TASK_FILTER"
+            args+=(--task-filter "$TASK_FILTER")
           fi
 
           if [[ "$VERBOSE" == "true" ]]; then
-            ARGS="$ARGS --verbose"
+            args+=(--verbose)
           fi
 
-          echo "Running: ./mcpchecker $ARGS"
-          ./mcpchecker $ARGS | tee mcpchecker-results.json || true
+          echo "Running: ./mcpchecker ${args[*]}"
+          ./mcpchecker "${args[@]}" | tee mcpchecker-results.json || true
 
           # Extract results for summary
           if [[ -f mcpchecker-results.json ]]; then
