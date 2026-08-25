@@ -140,6 +140,22 @@ Two layers, both deterministic and offline:
   JSON Schema and the tool annotations. Treat it as a contract test — the schema and
   descriptions are the interface a model reasons about, so changing them should fail here.
 
+- **Manual protocol checks** with the official MCP Inspector, via `scripts/mcp-inspect.sh`:
+
+  ```bash
+  ./mvnw package -DskipTests
+  scripts/mcp-inspect.sh                     # tools/list
+  scripts/mcp-inspect.sh call searchKnowledgeBase query="CrashLoopBackOff"
+  JAR=/path/to/released.jar scripts/mcp-inspect.sh   # check a published artefact
+  ```
+
+  Worth running against the packaged JAR before a release: it starts the real binary, so it
+  surfaces problems the test suite cannot, such as configuration keys the runtime ignores.
+  Two details the script handles, both of which cost time to discover: the Inspector
+  appends its own flags to the server command (so `java` must be wrapped, or it prints its
+  usage and the connection dies), and it exits with code 5 when a tool returns
+  `isError: true` — that is the tool reporting, not the Inspector failing.
+
 `evals/` is a separate concern: mcpchecker runs an LLM agent against the server to judge
 whether tasks succeed. It is non-deterministic and costs API credits, so run it before a
 release rather than on every commit.
