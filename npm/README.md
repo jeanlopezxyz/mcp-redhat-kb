@@ -4,7 +4,7 @@ MCP Server for searching the Red Hat Knowledge Base (Hydra API).
 
 ## Requirements
 
-- Java 21+
+- Java 25+
 - Red Hat API Token
 
 ## Installation
@@ -54,9 +54,13 @@ Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 # stdio mode (default)
 npx mcp-redhat-kb
 
-# SSE mode
+# HTTP mode - Streamable HTTP endpoint at http://127.0.0.1:9081/mcp
 npx mcp-redhat-kb --port 9081
 ```
+
+In HTTP mode the server binds to `127.0.0.1` and has no authentication of its own. Before
+exposing it, enable OAuth 2.1 with `MCP_OIDC_ENABLED=true` and the `KEYCLOAK_*` variables —
+otherwise anyone who reaches the port can use your Red Hat subscription.
 
 ## License
 

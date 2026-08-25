@@ -1,6 +1,7 @@
 {
   "name": "mcp-redhat-kb",
   "version": "1.0.0",
+  "mcpName": "io.github.jeanlopezxyz/mcp-redhat-kb",
   "description": "MCP Server for Red Hat Knowledge Base",
   "main": "cli.js",
   "bin": {
@@ -23,7 +24,7 @@
     "url": "https://github.com/jeanlopezxyz/mcp-redhat-kb"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "files": [
     "cli.js",
