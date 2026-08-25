@@ -75,7 +75,7 @@ jobs:
       # Signed provenance for the JAR, so consumers can verify it was built by this
       # workflow from this commit rather than uploaded by hand.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@977bb373b6ac4b70e50e64b944d0c9a29ea5d51d # v1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: target/mcp-redhat-kb.jar
 
