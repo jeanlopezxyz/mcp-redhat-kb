@@ -12,9 +12,19 @@ import io.smallrye.config.WithDefault;
 public interface RedHatApiConfig {
 
     /**
-     * Red Hat offline token for authentication.
+     * Shared Red Hat offline token, used when a caller supplies none of their own.
      */
     Optional<String> offlineToken();
+
+    /**
+     * Whether every caller must supply their own Red Hat token.
+     *
+     * <p>When true the shared token is never used to serve a request, so no caller can read
+     * the Knowledge Base through another account's entitlements and Red Hat's audit trail
+     * attributes each call to the person who made it.
+     */
+    @WithDefault("false")
+    boolean requireUserToken();
 
     /**
      * SSO configuration.

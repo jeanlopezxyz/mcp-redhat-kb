@@ -1,5 +1,6 @@
 package com.redhat.kb.infrastructure.client;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -15,10 +16,13 @@ import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseSearchResponseDto;
 
+import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+
+import static com.redhat.kb.KnowledgeBaseConstants.DEFAULT_MAX_RESULTS;
 
 /**
  * HTTP client for Red Hat Knowledge Base (Hydra API).
@@ -33,7 +37,10 @@ public class KnowledgeBaseClient {
     private static final String SEARCH_FIELDS = "id,title,abstract,documentKind,view_uri,product,lastModifiedDate";
     private static final String DETAIL_FIELDS = "id,title,abstract,documentKind,view_uri,product,issue," +
             "solution_environment,solution_rootcause,solution_resolution,solution_diagnosticsteps," +
-            "lastModifiedDate,createdDate";
+            "lastModifiedDate";
+
+    /** Guards against an oversized response exhausting the heap. */
+    private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
     private final RedHatApiConfig config;
     private final RedHatAuthClient authClient;
@@ -50,84 +57,131 @@ public class KnowledgeBaseClient {
                 .build();
     }
 
+    // Note on caching: the credential is the first parameter of both cached methods, so
+    // Quarkus includes it in the cache key. Entries are therefore partitioned per
+    // credential — a result fetched with one subscription is never served to another,
+    // which matters because entitlements decide what the API returns.
+
     /**
      * Searches articles in Red Hat Knowledge Base.
+     *
+     * <p>Free-text and filter values are Lucene-escaped: URL encoding alone would still let
+     * the value reach Solr as query syntax and alter the search semantics.
      */
-    public List<KnowledgeBaseArticleDto> search(String query, int maxResults, String product, String documentType) {
-        try {
-            String token = authClient.getAccessToken();
+    @CacheResult(cacheName = "kb-search")
+    public List<KnowledgeBaseArticleDto> search(RedHatCredential credential, String query, int maxResults,
+            String product, String documentType) {
+        StringBuilder urlBuilder = new StringBuilder(HYDRA_BASE_URL);
+        urlBuilder.append("?q=").append(encode(SolrQuery.escape(query)));
+        urlBuilder.append("&rows=").append(maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS);
+        urlBuilder.append("&fl=").append(SEARCH_FIELDS);
 
-            StringBuilder urlBuilder = new StringBuilder(HYDRA_BASE_URL);
-            urlBuilder.append("?q=").append(URLEncoder.encode(query, StandardCharsets.UTF_8));
-            urlBuilder.append("&rows=").append(maxResults > 0 ? maxResults : 10);
-            urlBuilder.append("&fl=").append(SEARCH_FIELDS);
-
-            if (product != null && !product.isBlank()) {
-                urlBuilder.append("&fq=product:").append(URLEncoder.encode("\"" + product + "\"", StandardCharsets.UTF_8));
-            }
-
-            if (documentType != null && !documentType.isBlank()) {
-                urlBuilder.append("&fq=documentKind:").append(URLEncoder.encode("\"" + documentType + "\"", StandardCharsets.UTF_8));
-            }
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(urlBuilder.toString()))
-                    .header(HttpHeaders.AUTHORIZATION, BEARER_PREFIX + token)
-                    .GET()
-                    .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == Response.Status.OK.getStatusCode()) {
-                KnowledgeBaseSearchResponseDto searchResponse =
-                    objectMapper.readValue(response.body(), KnowledgeBaseSearchResponseDto.class);
-                return searchResponse.getResponse() != null
-                    ? searchResponse.getResponse().getDocs()
-                    : List.of();
-            } else {
-                throw new RuntimeException("Error searching Knowledge Base: " + response.statusCode() + " - " + response.body());
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Error connecting to Hydra API", e);
+        if (product != null && !product.isBlank()) {
+            urlBuilder.append("&fq=product:").append(encode("\"" + SolrQuery.escape(product) + "\""));
         }
+
+        if (documentType != null && !documentType.isBlank()) {
+            urlBuilder.append("&fq=documentKind:").append(encode("\"" + SolrQuery.escape(documentType) + "\""));
+        }
+
+        return extractDocs(execute(credential, urlBuilder.toString(), "search the Knowledge Base"));
     }
 
     /**
      * Gets the full details of a solution by its ID.
      */
-    public Optional<KnowledgeBaseArticleDto> getSolution(String solutionId) {
+    @CacheResult(cacheName = "kb-article")
+    public Optional<KnowledgeBaseArticleDto> getSolution(RedHatCredential credential, String solutionId) {
+        if (!SolrQuery.isValidArticleId(solutionId)) {
+            throw new KnowledgeBaseException("Article ID must be numeric");
+        }
+
+        String url = HYDRA_BASE_URL
+                + "?q=" + encode("id:" + solutionId)
+                + "&fl=" + DETAIL_FIELDS;
+
+        return extractDocs(execute(credential, url, "fetch the article")).stream().findFirst();
+    }
+
+    /**
+     * Issues the request and deserializes the response, mapping failures to a typed
+     * exception whose message names the failure mode.
+     */
+    private KnowledgeBaseSearchResponseDto execute(RedHatCredential credential, String url, String action) {
+        HttpResponse<String> response;
         try {
-            String token = authClient.getAccessToken();
-
-            String url = HYDRA_BASE_URL +
-                "?q=" + URLEncoder.encode("id:" + solutionId, StandardCharsets.UTF_8) +
-                "&fl=" + DETAIL_FIELDS;
-
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header(HttpHeaders.AUTHORIZATION, BEARER_PREFIX + token)
+                    .header(HttpHeaders.AUTHORIZATION, BEARER_PREFIX + authClient.getAccessToken(credential))
                     .GET()
                     .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == Response.Status.OK.getStatusCode()) {
-                KnowledgeBaseSearchResponseDto searchResponse =
-                    objectMapper.readValue(response.body(), KnowledgeBaseSearchResponseDto.class);
-
-                if (searchResponse.getResponse() != null &&
-                    searchResponse.getResponse().getDocs() != null &&
-                    !searchResponse.getResponse().getDocs().isEmpty()) {
-                    return Optional.of(searchResponse.getResponse().getDocs().get(0));
-                }
-                return Optional.empty();
-            } else {
-                throw new RuntimeException("Error getting solution: " + response.statusCode());
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Error connecting to Hydra API", e);
+            response = httpClient.send(request, boundedBodyHandler());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new KnowledgeBaseException("Request to the Knowledge Base was interrupted");
+        } catch (AuthenticationException e) {
+            // Already carries a client-safe message.
+            throw e;
+        } catch (IOException e) {
+            throw new KnowledgeBaseException("Could not reach the Red Hat Knowledge Base API");
         }
+
+        int status = response.statusCode();
+        if (status != Response.Status.OK.getStatusCode()) {
+            throw new KnowledgeBaseException(describeFailure(status, action));
+        }
+
+        try {
+            return objectMapper.readValue(response.body(), KnowledgeBaseSearchResponseDto.class);
+        } catch (IOException e) {
+            throw new KnowledgeBaseException("Received a malformed response from the Knowledge Base API");
+        }
+    }
+
+    /**
+     * Turns a status code into an actionable message. Response bodies are deliberately
+     * excluded: this text reaches the MCP client.
+     */
+    private String describeFailure(int status, String action) {
+        String reason = switch (status) {
+            case 401 -> "authentication failed - REDHAT_TOKEN may be expired or invalid";
+            case 403 -> "access denied - the article may require a subscription your account lacks";
+            case 404 -> "the requested resource does not exist";
+            case 429 -> "rate limit exceeded - retry in a few moments";
+            default -> status >= 500
+                    ? "the Red Hat Knowledge Base API is unavailable"
+                    : "unexpected response";
+        };
+        return "Could not " + action + ": " + reason + " (HTTP " + status + ")";
+    }
+
+    /**
+     * Reads the body into a string while refusing responses beyond {@link #MAX_RESPONSE_BYTES}.
+     */
+    private static HttpResponse.BodyHandler<String> boundedBodyHandler() {
+        return info -> HttpResponse.BodySubscribers.mapping(
+                HttpResponse.BodySubscribers.ofByteArray(),
+                bytes -> {
+                    if (bytes.length > MAX_RESPONSE_BYTES) {
+                        throw new KnowledgeBaseException("Knowledge Base response exceeded the size limit");
+                    }
+                    return new String(bytes, StandardCharsets.UTF_8);
+                });
+    }
+
+    /**
+     * Extracts the document list, tolerating a response that omits {@code response} or {@code docs}.
+     */
+    private static List<KnowledgeBaseArticleDto> extractDocs(KnowledgeBaseSearchResponseDto response) {
+        return Optional.ofNullable(response)
+                .map(KnowledgeBaseSearchResponseDto::getResponse)
+                .map(KnowledgeBaseSearchResponseDto.Response::getDocs)
+                .orElseGet(List::of);
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

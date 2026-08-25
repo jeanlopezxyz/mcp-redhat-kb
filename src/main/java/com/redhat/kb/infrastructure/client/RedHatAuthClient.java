@@ -1,12 +1,16 @@
 package com.redhat.kb.infrastructure.client;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,21 +21,45 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
 /**
- * Client for Red Hat authentication.
- * Supports direct JWT tokens and SSO offline tokens.
+ * Exchanges Red Hat offline tokens for access tokens.
+ *
+ * <p>Access tokens are cached per credential, keyed by the credential's fingerprint, so one
+ * caller's token is never handed to another. The bean is a singleton shared across
+ * concurrent requests, so each entry is published atomically and refreshes are serialized
+ * per credential rather than globally.
  */
 @ApplicationScoped
 public class RedHatAuthClient {
+
+    private static final Logger LOG = Logger.getLogger(RedHatAuthClient.class);
+
+    /**
+     * Upper bound on how long an access token is reused. The {@code exp} claim of a direct
+     * JWT is read without signature verification, so it is treated as a hint rather than as
+     * authority: re-checking periodically limits the window in which a revoked token would
+     * still be used.
+     */
+    private static final Duration MAX_CACHE_DURATION = Duration.ofMinutes(15);
+
+    /** Bounds the cache so a stream of distinct credentials cannot exhaust memory. */
+    private static final int MAX_CACHED_CREDENTIALS = 500;
+
+    /** Access token and its expiry, published together so readers never see a mismatch. */
+    private record TokenState(String token, Instant expiry) {
+        boolean isValid() {
+            return Instant.now().isBefore(expiry);
+        }
+    }
 
     private final RedHatApiConfig config;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    private String cachedAccessToken;
-    private Instant tokenExpiry;
-    private Boolean isDirectJwt = null;
+    /** Keyed by credential fingerprint, never by the token itself. */
+    private final Map<String, TokenState> tokenCache = new ConcurrentHashMap<>();
 
     @Inject
     public RedHatAuthClient(RedHatApiConfig config, ObjectMapper objectMapper) {
@@ -43,36 +71,51 @@ public class RedHatAuthClient {
     }
 
     /**
-     * Gets a valid access token.
+     * Returns a valid access token for the given credential, refreshing it when the cached
+     * one is missing or expired.
      */
-    public String getAccessToken() {
-        if (cachedAccessToken != null && tokenExpiry != null && Instant.now().isBefore(tokenExpiry)) {
-            return cachedAccessToken;
+    public String getAccessToken(RedHatCredential credential) {
+        TokenState cached = tokenCache.get(credential.fingerprint());
+        if (cached != null && cached.isValid()) {
+            return cached.token();
         }
-        return refreshAccessToken();
+
+        if (tokenCache.size() >= MAX_CACHED_CREDENTIALS) {
+            evictExpired();
+        }
+
+        // compute() holds a per-key lock, so concurrent calls for the same credential
+        // result in a single SSO round trip while other credentials proceed unblocked.
+        TokenState state = tokenCache.compute(credential.fingerprint(), (key, existing) -> {
+            if (existing != null && existing.isValid()) {
+                return existing;
+            }
+            return exchange(credential);
+        });
+
+        return state.token();
+    }
+
+    private void evictExpired() {
+        tokenCache.values().removeIf(state -> !state.isValid());
     }
 
     /**
-     * Detects if the provided token is a direct JWT (access token).
+     * Detects if the provided token is a direct JWT (access token) rather than an offline
+     * token that has to be exchanged.
      */
     private boolean isJwtToken(String token) {
-        if (token == null || token.isBlank()) {
-            return false;
-        }
         String[] parts = token.split("\\.");
         if (parts.length != 3) {
             return false;
         }
         try {
-            String payload = new String(Base64.getUrlDecoder().decode(parts[1]));
-            JsonNode json = objectMapper.readTree(payload);
+            JsonNode json = decodePayload(parts[1]);
 
-            // If it has "typ": "Offline", it's an offline token that must be exchanged
+            // "typ": "Offline" marks an offline token, which must be exchanged.
             if (json.has("typ") && "Offline".equals(json.get("typ").asText())) {
                 return false;
             }
-
-            // If it has "exp", it's a direct JWT (access token)
             return json.has("exp");
         } catch (Exception e) {
             return false;
@@ -80,46 +123,47 @@ public class RedHatAuthClient {
     }
 
     /**
-     * Extracts the expiration date from a JWT token.
+     * Extracts the expiration of a JWT, clamped to {@link #MAX_CACHE_DURATION}.
      */
     private Instant getJwtExpiry(String token) {
+        Instant ceiling = Instant.now().plus(MAX_CACHE_DURATION);
         try {
-            String[] parts = token.split("\\.");
-            String payload = new String(Base64.getUrlDecoder().decode(parts[1]));
-            JsonNode json = objectMapper.readTree(payload);
+            JsonNode json = decodePayload(token.split("\\.")[1]);
             if (json.has("exp")) {
-                long expSeconds = json.get("exp").asLong();
-                return Instant.ofEpochSecond(expSeconds);
+                Instant claimed = Instant.ofEpochSecond(json.get("exp").asLong());
+                return claimed.isBefore(ceiling) ? claimed : ceiling;
             }
+            LOG.debug("JWT has no exp claim; falling back to the maximum cache duration");
         } catch (Exception e) {
-            // Ignore parsing errors
+            LOG.debug("Could not parse JWT expiry; falling back to the maximum cache duration");
         }
-        return Instant.now().plusSeconds(3600);
+        return ceiling;
+    }
+
+    private JsonNode decodePayload(String segment) throws java.io.IOException {
+        String payload = new String(Base64.getUrlDecoder().decode(segment), StandardCharsets.UTF_8);
+        return objectMapper.readTree(payload);
     }
 
     /**
-     * Refreshes the access token.
+     * Exchanges an offline token with Red Hat SSO.
+     *
+     * <p>Failures never carry the SSO response body or the underlying exception message
+     * outward: those can echo the submitted token, and this message reaches the MCP client.
+     * Details go to the log, identified by fingerprint rather than by token.
      */
-    private String refreshAccessToken() {
+    private TokenState exchange(RedHatCredential credential) {
+        String token = credential.token();
+
+        if (isJwtToken(token)) {
+            return new TokenState(token, getJwtExpiry(token));
+        }
+
+        HttpResponse<String> response;
         try {
-            String token = config.offlineToken()
-                    .orElseThrow(() -> new RuntimeException("Token not configured. Set REDHAT_TOKEN."));
-
-            if (isDirectJwt == null) {
-                isDirectJwt = isJwtToken(token);
-            }
-
-            if (isDirectJwt) {
-                cachedAccessToken = token;
-                tokenExpiry = getJwtExpiry(token);
-                return cachedAccessToken;
-            }
-
-            String requestBody = String.format(
-                    "grant_type=refresh_token&client_id=%s&refresh_token=%s",
-                    config.sso().clientId(),
-                    token
-            );
+            String requestBody = "grant_type=refresh_token"
+                    + "&client_id=" + URLEncoder.encode(config.sso().clientId(), StandardCharsets.UTF_8)
+                    + "&refresh_token=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(config.sso().tokenUrl()))
@@ -128,32 +172,48 @@ public class RedHatAuthClient {
                     .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == Response.Status.OK.getStatusCode()) {
-                JsonNode json = objectMapper.readTree(response.body());
-
-                JsonNode accessTokenNode = json.get("access_token");
-                JsonNode expiresInNode = json.get("expires_in");
-
-                if (accessTokenNode == null || expiresInNode == null) {
-                    throw new RuntimeException("Invalid response from Red Hat SSO: missing access_token or expires_in");
-                }
-
-                cachedAccessToken = accessTokenNode.asText();
-                int expiresIn = expiresInNode.asInt();
-                tokenExpiry = Instant.now().plusSeconds(expiresIn - config.sso().tokenRenewalBufferSeconds());
-                return cachedAccessToken;
-            } else {
-                throw new RuntimeException("Error getting token from Red Hat SSO: " + response.statusCode() + " - " + response.body());
-            }
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AuthenticationException("Authentication with Red Hat SSO was interrupted");
         } catch (Exception e) {
-            throw new RuntimeException("Error authenticating with Red Hat: " + e.getMessage(), e);
+            LOG.errorf(e, "Could not reach Red Hat SSO for credential %s", credential.fingerprint());
+            throw new AuthenticationException("Could not reach Red Hat SSO");
+        }
+
+        if (response.statusCode() != Response.Status.OK.getStatusCode()) {
+            LOG.errorf("Red Hat SSO rejected credential %s with HTTP %d",
+                    credential.fingerprint(), response.statusCode());
+            throw new AuthenticationException(
+                    "Red Hat SSO rejected the token (HTTP " + response.statusCode()
+                            + "). Verify that it is a valid, non-expired offline token.");
+        }
+
+        try {
+            JsonNode json = objectMapper.readTree(response.body());
+            JsonNode accessTokenNode = json.get("access_token");
+            JsonNode expiresInNode = json.get("expires_in");
+
+            if (accessTokenNode == null || expiresInNode == null) {
+                throw new AuthenticationException(
+                        "Red Hat SSO returned a response without access_token or expires_in");
+            }
+
+            long ttl = Math.max(1, expiresInNode.asLong() - config.sso().tokenRenewalBufferSeconds());
+            Instant expiry = Instant.now().plusSeconds(ttl);
+            Instant ceiling = Instant.now().plus(MAX_CACHE_DURATION);
+
+            return new TokenState(accessTokenNode.asText(), expiry.isBefore(ceiling) ? expiry : ceiling);
+        } catch (AuthenticationException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Could not parse the Red Hat SSO response", e);
+            throw new AuthenticationException("Could not parse the Red Hat SSO response");
         }
     }
 
     /**
-     * Checks if the service is properly configured.
+     * Whether a shared token is configured on the server.
      */
     public boolean isConfigured() {
         return config.isConfigured();
