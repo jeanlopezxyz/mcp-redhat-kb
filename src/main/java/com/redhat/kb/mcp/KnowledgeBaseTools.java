@@ -5,7 +5,7 @@ import com.redhat.kb.infrastructure.client.AuthenticationException;
 import com.redhat.kb.infrastructure.client.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.client.MissingCredentialException;
 import com.redhat.kb.infrastructure.client.RedHatCredential;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.client.SearchPage;
 
 import io.quarkiverse.mcp.server.MetaKey;
 import io.quarkiverse.mcp.server.TextContent;
@@ -55,7 +55,9 @@ public class KnowledgeBaseTools {
                     (e.g. 'KubePodCrashLooping') and general technical topics.
                     Set documentType to 'Solution' when troubleshooting a failure, or \
                     'Documentation' when looking for how-to guides and best practices.
-                    Returns a compact list; call getSolution with an ID for the full article.""",
+                    Reports how many articles matched in total, so a much larger total than \
+                    the page returned means the query should be narrowed.
+                    Returns a compact list; call getArticle with an ID for the full text.""",
             annotations = @Tool.Annotations(
                     readOnlyHint = true,
                     destructiveHint = false,
@@ -85,22 +87,30 @@ public class KnowledgeBaseTools {
             }
             audit.record("searchKnowledgeBase", query, credential.fingerprint());
 
-            List<KnowledgeBaseArticleDto> results = kbService.search(
+            SearchPage page = kbService.search(
                     credential,
                     query.strip(),
                     clampMaxResults(maxResults),
                     normalize(product),
                     normalize(documentType));
 
-            if (results.isEmpty()) {
-                return ToolResponse.success(new TextContent(
-                        "No results found for: " + query.strip()
-                                + "\nTry broader keywords, or omit the product/documentType filters."));
+            if (page.isEmpty()) {
+                // A declared output schema obliges every successful response to carry
+                // structured content, so an empty result set ships an empty record rather
+                // than text alone.
+                return new ToolResponse(
+                        false,
+                        List.of(new TextContent("No results found for: " + query.strip()
+                                + "\nTry broader keywords, or omit the product/documentType filters."
+                                + "\nNote that product is matched exactly, so it must be the full name,"
+                                + " for example 'Red Hat OpenShift Container Platform'.")),
+                        new SearchResult(0, 0, List.of()),
+                        Map.<MetaKey, Object>of());
             }
             // Both channels: prose for the model to read, structured data for the client
             // to parse without scraping it back out of the text. The prose is rendered
             // from the record, so the two cannot drift apart.
-            SearchResult structured = ArticleFormatter.toSearchResult(results);
+            SearchResult structured = ArticleFormatter.toSearchResult(page);
             return new ToolResponse(
                     false,
                     List.of(new TextContent(ArticleFormatter.formatSearchResults(structured, query.strip()))),
@@ -112,7 +122,7 @@ public class KnowledgeBaseTools {
     }
 
     @Tool(
-            name = "getSolution",
+            name = "getArticle",
             title = "Get Knowledge Base article",
             description = "Retrieve the full content of a Knowledge Base article: environment, issue, "
                     + "root cause, diagnostic steps and resolution. Use a numeric article ID returned "
@@ -124,23 +134,23 @@ public class KnowledgeBaseTools {
                     openWorldHint = true),
             outputSchema = @Tool.OutputSchema(from = ArticleDetail.class))
     @Blocking
-    public ToolResponse getSolution(
-            @ToolArg(description = "Numeric article ID from search results, e.g. '5049001'") String solutionId) {
+    public ToolResponse getArticle(
+            @ToolArg(description = "Numeric article ID from search results, e.g. '5049001'") String articleId) {
 
-        Optional<ToolResponse> rejection = validate("solutionId", solutionId);
+        Optional<ToolResponse> rejection = validate("articleId", articleId);
         if (rejection.isPresent()) {
             return rejection.get();
         }
 
         try {
             RedHatCredential credential = kbService.currentCredential();
-            Optional<ToolResponse> throttled = enforceRateLimit("getSolution", credential);
+            Optional<ToolResponse> throttled = enforceRateLimit("getArticle", credential);
             if (throttled.isPresent()) {
                 return throttled.get();
             }
-            audit.record("getSolution", solutionId, credential.fingerprint());
+            audit.record("getArticle", articleId, credential.fingerprint());
 
-            return kbService.getArticle(credential, solutionId.strip())
+            return kbService.getArticle(credential, articleId.strip())
                     .map(article -> {
                         ArticleDetail structured = ArticleFormatter.toArticleDetail(article);
                         return new ToolResponse(
@@ -150,7 +160,7 @@ public class KnowledgeBaseTools {
                                 Map.<MetaKey, Object>of());
                     })
                     .orElseGet(() -> ToolResponse.error(
-                            "Error: no article found with ID " + solutionId.strip()));
+                            "Error: no article found with ID " + articleId.strip()));
         } catch (Exception e) {
             return toErrorResponse("Could not retrieve the article", e);
         }

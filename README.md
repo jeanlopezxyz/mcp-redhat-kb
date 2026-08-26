@@ -285,7 +285,10 @@ query is truncated. Route that category to your log store to answer who searched
 
 ## Tools
 
-This server provides **2 tools**. Both are annotated as read-only and idempotent.
+This server provides **4 tools**, all annotated as read-only and idempotent.
+
+The first two read the Knowledge Base with your Red Hat credential. The last two use Red
+Hat's public product APIs, so they need no token and spend no subscription.
 
 #### `searchKnowledgeBase`
 Search for solutions, documentation and articles. Works with error messages, log excerpts,
@@ -302,13 +305,33 @@ Use `documentType: Solution` when troubleshooting a failure, and `documentType: 
 for how-to guides — these replace the former `troubleshootError`, `findSolutionForAlert` and
 `searchDocumentation` tools, which were all the same search behind different names.
 
-#### `getSolution`
+Results report how many articles matched in total, so the assistant can tell a precise
+search from one that needs narrowing.
+
+#### `getArticle`
 Retrieve the full content of an article: environment, issue, root cause, diagnostic steps and
 resolution. Long articles are truncated to keep context usage bounded.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `solutionId` | string | Yes | Numeric article ID from search results |
+| `articleId` | string | Yes | Numeric article ID from search results |
+
+#### `lookupCve`
+Look up a CVE in Red Hat's security database: severity, CVSS v3 score, which products have a
+released fix and which are still affected, plus any mitigation. Prefer it over a search
+whenever a CVE identifier is involved — it returns structured data, not prose.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cveId` | string | Yes | e.g. `CVE-2024-6387` (the `CVE-` prefix is optional) |
+
+#### `getProductLifecycle`
+Every released version of a product with its support phase, GA date and end of maintenance.
+Answers end-of-life and upgrade-deadline questions.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `product` | string | Yes | Full product name, e.g. `Red Hat Enterprise Linux` |
 
 ---
 
@@ -341,6 +364,18 @@ Talk to your assistant normally — it picks the tools and arguments itself.
 > "Search for known failure points during OpenShift cluster installation."
 
 > "Find Red Hat documentation on performance tuning for RHEL running database workloads."
+
+**Checking a vulnerability**
+
+> "Does CVE-2024-6387 affect RHEL 9, and is there a fix?"
+
+> "What's the severity of CVE-2024-3094 and which products are still exposed?"
+
+**Support windows**
+
+> "When does OpenShift 4.14 reach end of maintenance?"
+
+> "Which RHEL versions are still in full support?"
 
 **Reading a specific article**
 

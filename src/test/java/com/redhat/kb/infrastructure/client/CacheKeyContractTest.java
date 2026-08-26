@@ -40,7 +40,7 @@ class CacheKeyContractTest {
         }
 
         assertEquals(2, cachedMethods,
-                "expected search and getSolution to be cached; a new cached method must be "
+                "expected search and getArticle to be cached; a new cached method must be "
                         + "keyed by credential too");
     }
 

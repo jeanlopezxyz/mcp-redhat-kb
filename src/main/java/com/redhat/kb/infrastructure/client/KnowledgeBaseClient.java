@@ -69,7 +69,7 @@ public class KnowledgeBaseClient {
      * the value reach Solr as query syntax and alter the search semantics.
      */
     @CacheResult(cacheName = "kb-search")
-    public List<KnowledgeBaseArticleDto> search(RedHatCredential credential, String query, int maxResults,
+    public SearchPage search(RedHatCredential credential, String query, int maxResults,
             String product, String documentType) {
         StringBuilder urlBuilder = new StringBuilder(HYDRA_BASE_URL);
         urlBuilder.append("?q=").append(encode(SolrQuery.escape(query)));
@@ -77,6 +77,7 @@ public class KnowledgeBaseClient {
         urlBuilder.append("&fl=").append(SEARCH_FIELDS);
 
         if (product != null && !product.isBlank()) {
+            // Matched as a phrase, so the value has to be the product's full name.
             urlBuilder.append("&fq=product:").append(encode("\"" + SolrQuery.escape(product) + "\""));
         }
 
@@ -84,20 +85,23 @@ public class KnowledgeBaseClient {
             urlBuilder.append("&fq=documentKind:").append(encode("\"" + SolrQuery.escape(documentType) + "\""));
         }
 
-        return extractDocs(execute(credential, urlBuilder.toString(), "search the Knowledge Base"));
+        KnowledgeBaseSearchResponseDto response =
+                execute(credential, urlBuilder.toString(), "search the Knowledge Base");
+
+        return new SearchPage(extractDocs(response), extractTotal(response));
     }
 
     /**
-     * Gets the full details of a solution by its ID.
+     * Gets the full details of an article by its ID.
      */
     @CacheResult(cacheName = "kb-article")
-    public Optional<KnowledgeBaseArticleDto> getSolution(RedHatCredential credential, String solutionId) {
-        if (!SolrQuery.isValidArticleId(solutionId)) {
+    public Optional<KnowledgeBaseArticleDto> getArticle(RedHatCredential credential, String articleId) {
+        if (!SolrQuery.isValidArticleId(articleId)) {
             throw new KnowledgeBaseException("Article ID must be numeric");
         }
 
         String url = HYDRA_BASE_URL
-                + "?q=" + encode("id:" + solutionId)
+                + "?q=" + encode("id:" + articleId)
                 + "&fl=" + DETAIL_FIELDS;
 
         return extractDocs(execute(credential, url, "fetch the article")).stream().findFirst();
@@ -179,6 +183,16 @@ public class KnowledgeBaseClient {
                 .map(KnowledgeBaseSearchResponseDto::getResponse)
                 .map(KnowledgeBaseSearchResponseDto.Response::getDocs)
                 .orElseGet(List::of);
+    }
+
+    /**
+     * How many documents matched, which is usually far more than one page holds.
+     */
+    private static int extractTotal(KnowledgeBaseSearchResponseDto response) {
+        return Optional.ofNullable(response)
+                .map(KnowledgeBaseSearchResponseDto::getResponse)
+                .map(KnowledgeBaseSearchResponseDto.Response::getNumFound)
+                .orElse(0);
     }
 
     private static String encode(String value) {

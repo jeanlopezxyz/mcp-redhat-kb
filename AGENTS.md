@@ -16,8 +16,13 @@ Built with Quarkus MCP Server, this enables AI assistants to search and retrieve
       credential model (RedHatCredential, CredentialResolver).
     - `infrastructure/config/` - configuration classes (RedHatApiConfig).
     - `infrastructure/dto/` - data transfer objects for API responses.
-    - `mcp/` - MCP tool definitions (KnowledgeBaseTools), plus ArticleFormatter and
-      ContentSanitizer, which render article content for the model.
+    - `mcp/` - MCP tool definitions (KnowledgeBaseTools for the credentialed Knowledge
+      Base, SecurityTools for Red Hat's public CVE and life cycle APIs), plus the
+      formatters and ContentSanitizer that render content for the model.
+
+  A tool that declares `outputSchema` **must** return structured content on every success,
+  including empty-result branches — a client rejects the whole call otherwise and the
+  model never sees the message. `StructuredContentContractTest` guards this.
     - `KnowledgeBaseConstants.java` - shared constants.
   - `src/main/resources/` - application configuration files.
   - `src/test/java/` - test sources, mirroring the main package layout.

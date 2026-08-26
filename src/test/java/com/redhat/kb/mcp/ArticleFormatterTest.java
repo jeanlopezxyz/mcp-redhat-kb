@@ -2,6 +2,7 @@ package com.redhat.kb.mcp;
 
 import java.util.List;
 
+import com.redhat.kb.infrastructure.client.SearchPage;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ class ArticleFormatterTest {
     }
 
     private static String renderSearch(List<KnowledgeBaseArticleDto> dtos, String query) {
-        return ArticleFormatter.formatSearchResults(ArticleFormatter.toSearchResult(dtos), query);
+        return ArticleFormatter.formatSearchResults(ArticleFormatter.toSearchResult(new SearchPage(dtos, dtos.size())), query);
     }
 
     @Test
@@ -37,6 +38,43 @@ class ArticleFormatterTest {
 
         assertTrue(output.contains("5049001 [Solution] Pod in CrashLoopBackOff"));
         assertTrue(output.contains("1 result(s) for: crashloop"));
+    }
+
+    @Test
+    @DisplayName("says how many matched when the page is only part of the total")
+    void reportsTotalWhenPaged() {
+        // Without the total, ten results out of ten and ten out of 2638 look identical to
+        // the model, so it cannot tell a precise search from one that needs narrowing.
+        SearchResult result = ArticleFormatter.toSearchResult(
+                new SearchPage(List.of(article("1", "One"), article("2", "Two")), 2638));
+
+        String output = ArticleFormatter.formatSearchResults(result, "crashloop");
+
+        assertEquals(2638, result.totalFound());
+        assertTrue(output.contains("Showing 2 of 2638 matches"));
+    }
+
+    @Test
+    @DisplayName("suggests narrowing when the total dwarfs the page")
+    void suggestsNarrowingBroadQueries() {
+        String output = ArticleFormatter.formatSearchResults(
+                ArticleFormatter.toSearchResult(new SearchPage(List.of(article("1", "One")), 900)), "error");
+
+        assertTrue(output.contains("query is broad"));
+    }
+
+    @Test
+    @DisplayName("does not mention a total when the page holds every match")
+    void omitsTotalWhenComplete() {
+        // Saying "3 of 3" adds noise and invites a pointless refinement.
+        String output = ArticleFormatter.formatSearchResults(
+                ArticleFormatter.toSearchResult(
+                        new SearchPage(List.of(article("1", "a"), article("2", "b"), article("3", "c")), 3)),
+                "very specific error");
+
+        assertTrue(output.contains("3 result(s) for"));
+        assertFalse(output.contains("Showing"));
+        assertFalse(output.contains("query is broad"));
     }
 
     @Test

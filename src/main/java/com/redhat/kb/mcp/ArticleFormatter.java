@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.redhat.kb.infrastructure.client.SearchPage;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 
 import static com.redhat.kb.KnowledgeBaseConstants.ARTICLE_BASE_URL;
@@ -36,8 +37,8 @@ final class ArticleFormatter {
     /**
      * Builds the structured payload for a search.
      */
-    static SearchResult toSearchResult(List<KnowledgeBaseArticleDto> results) {
-        List<SearchResult.Article> articles = results.stream()
+    static SearchResult toSearchResult(SearchPage page) {
+        List<SearchResult.Article> articles = page.articles().stream()
                 .map(a -> new SearchResult.Article(
                         a.getId(),
                         ContentSanitizer.clean(a.getTitle()),
@@ -45,7 +46,7 @@ final class ArticleFormatter {
                         safeUrl(a),
                         ContentSanitizer.truncate(ContentSanitizer.clean(a.getAbstractText()), MAX_SUMMARY_CHARS)))
                 .toList();
-        return new SearchResult(articles.size(), articles);
+        return new SearchResult(articles.size(), page.totalFound(), articles);
     }
 
     /**
@@ -55,7 +56,21 @@ final class ArticleFormatter {
      */
     static String formatSearchResults(SearchResult result, String query) {
         StringBuilder sb = new StringBuilder();
-        sb.append(result.count()).append(" result(s) for: ").append(ContentSanitizer.clean(query)).append('\n');
+
+        // Stating the total is what lets the model tell a precise search from a vague one:
+        // ten of ten is an answer, ten of several thousand is a hint to narrow the query.
+        if (result.totalFound() > result.count()) {
+            sb.append("Showing ").append(result.count())
+              .append(" of ").append(result.totalFound()).append(" matches for: ");
+        } else {
+            sb.append(result.count()).append(" result(s) for: ");
+        }
+        sb.append(ContentSanitizer.clean(query)).append('\n');
+
+        if (result.totalFound() > result.count() * 5) {
+            sb.append("The query is broad; add a product, version or error text to narrow it.\n");
+        }
+
         sb.append("Article URLs are ").append(ARTICLE_BASE_URL).append("<id>\n\n");
         sb.append(UNTRUSTED_OPEN).append('\n');
 
@@ -69,7 +84,7 @@ final class ArticleFormatter {
         }
 
         sb.append(UNTRUSTED_CLOSE).append('\n');
-        sb.append("\nCall getSolution with an article ID for the full content.");
+        sb.append("\nCall getArticle with an article ID for the full content.");
         return sb.toString();
     }
 

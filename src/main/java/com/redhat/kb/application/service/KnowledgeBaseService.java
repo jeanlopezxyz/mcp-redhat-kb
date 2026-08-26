@@ -2,13 +2,13 @@ package com.redhat.kb.application.service;
 
 import com.redhat.kb.infrastructure.client.CredentialResolver;
 import com.redhat.kb.infrastructure.client.KnowledgeBaseClient;
+import com.redhat.kb.infrastructure.client.SearchPage;
 import com.redhat.kb.infrastructure.client.RedHatCredential;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -61,7 +61,7 @@ public class KnowledgeBaseService {
      * @param documentType Filter by type: Solution, Documentation, Article (optional)
      * @return List of matching articles
      */
-    public List<KnowledgeBaseArticleDto> search(RedHatCredential credential, String query, int maxResults,
+    public SearchPage search(RedHatCredential credential, String query, int maxResults,
             String product, String documentType) {
         return kbClient.search(credential, query, maxResults, product, documentType);
     }
@@ -74,6 +74,6 @@ public class KnowledgeBaseService {
      * @return The article with full content, or empty if not found
      */
     public Optional<KnowledgeBaseArticleDto> getArticle(RedHatCredential credential, String articleId) {
-        return kbClient.getSolution(credential, articleId);
+        return kbClient.getArticle(credential, articleId);
     }
 }

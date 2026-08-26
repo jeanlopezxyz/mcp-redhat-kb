@@ -45,10 +45,12 @@ class KnowledgeBaseToolsProtocolTest {
     void exposesTwoTools() {
         client.when()
                 .toolsList(page -> {
-                    assertEquals(2, page.size(),
+                    assertEquals(4, page.size(),
                             "the catalogue should stay small; overlapping tools degrade tool selection");
                     assertNotNull(page.findByName("searchKnowledgeBase"));
-                    assertNotNull(page.findByName("getSolution"));
+                    assertNotNull(page.findByName("getArticle"));
+                    assertNotNull(page.findByName("lookupCve"));
+                    assertNotNull(page.findByName("getProductLifecycle"));
                 })
                 .thenAssertResults();
     }
@@ -58,7 +60,7 @@ class KnowledgeBaseToolsProtocolTest {
     void declaresReadOnlyAnnotations() {
         client.when()
                 .toolsList(page -> {
-                    for (String name : new String[] {"searchKnowledgeBase", "getSolution"}) {
+                    for (String name : new String[] {"searchKnowledgeBase", "getArticle", "lookupCve", "getProductLifecycle"}) {
                         ToolAnnotations annotations = page.findByName(name).annotations()
                                 .orElseThrow(() -> new AssertionError(name + " declares no annotations"));
 
@@ -114,7 +116,7 @@ class KnowledgeBaseToolsProtocolTest {
     @DisplayName("rejects a non-numeric article ID instead of forwarding it to the query")
     void rejectsNonNumericArticleId() {
         client.when()
-                .toolsCall("getSolution", Map.of("solutionId", "1 OR documentKind:Solution"), response -> {
+                .toolsCall("getArticle", Map.of("articleId", "1 OR documentKind:Solution"), response -> {
                     assertTrue(response.isError());
                     assertTrue(response.content().get(0).asText().text().contains("numeric"));
                 })
@@ -125,9 +127,9 @@ class KnowledgeBaseToolsProtocolTest {
     @DisplayName("rejects a blank article ID")
     void rejectsBlankArticleId() {
         client.when()
-                .toolsCall("getSolution", Map.of("solutionId", ""), response -> {
+                .toolsCall("getArticle", Map.of("articleId", ""), response -> {
                     assertTrue(response.isError());
-                    assertTrue(response.content().get(0).asText().text().contains("solutionId is required"));
+                    assertTrue(response.content().get(0).asText().text().contains("articleId is required"));
                 })
                 .thenAssertResults();
     }

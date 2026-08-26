@@ -46,7 +46,9 @@ Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 ## Available Tools
 
 - **searchKnowledgeBase**: Search Red Hat Knowledge Base for solutions and articles
-- **getSolution**: Get the full content of a Knowledge Base article
+- **getArticle**: Get the full content of a Knowledge Base article
+- **lookupCve**: Look up a CVE — severity, CVSS score, affected products and fixes
+- **getProductLifecycle**: Support phases and end-of-life dates for a product
 
 ## Usage
 
