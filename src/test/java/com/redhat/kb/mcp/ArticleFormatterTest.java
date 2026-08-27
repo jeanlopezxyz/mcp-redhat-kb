@@ -344,4 +344,46 @@ class ArticleFormatterTest {
         // Exactly one real heading: the injected one was neutralized by the sanitizer.
         assertEquals(1, output.split("\n--- Resolution ---\n", -1).length - 1);
     }
+
+    @Test
+    @DisplayName("omits the title line for a document that has none")
+    void omitsAnEmptyTitle() {
+        // Hydra returns title: null for some Discussion entries. An empty "Title:" line
+        // reads as a title the server failed to fetch rather than one that does not exist.
+        KnowledgeBaseArticle untitled = new KnowledgeBaseArticle();
+        untitled.setId("541306");
+        untitled.setDocumentKind("Discussion");
+
+        String text = ArticleFormatter.formatArticle(ArticleFormatter.toArticleDetail(untitled));
+
+        assertFalse(text.contains("Title:"), "an absent title must not render an empty line: " + text);
+        assertTrue(text.contains("ID: 541306"));
+    }
+
+    @Test
+    @DisplayName("marks an untitled entry in the result list")
+    void marksUntitledSearchHit() {
+        KnowledgeBaseArticle untitled = new KnowledgeBaseArticle();
+        untitled.setId("541306");
+        untitled.setDocumentKind("Discussion");
+
+        String text = ArticleFormatter.formatSearchResults(
+                ArticleFormatter.toSearchResult(new SearchPage(List.of(untitled), 1)), "q");
+
+        assertTrue(text.contains("(untitled)"),
+                "a line trailing off after the ID reads as truncated output: " + text);
+    }
+
+    @Test
+    @DisplayName("shows the last-modified day so the model can prefer the recent article")
+    void showsLastModifiedDay() {
+        KnowledgeBaseArticle article = article("7136675", "Pods in CrashLoopBackOff");
+        article.setLastModifiedDate("2024-06-13T23:37:19Z");
+
+        String text = ArticleFormatter.formatSearchResults(
+                ArticleFormatter.toSearchResult(new SearchPage(List.of(article), 1)), "q");
+
+        assertTrue(text.contains("(2024-06-13)"), text);
+        assertFalse(text.contains("23:37:19"), "the time of day is noise: " + text);
+    }
 }

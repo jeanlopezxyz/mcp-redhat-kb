@@ -20,7 +20,6 @@ import io.quarkiverse.mcp.server.ToolResponse;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
 
@@ -35,8 +34,6 @@ import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
  */
 @ApplicationScoped
 public class SecurityTools {
-
-    private static final Logger LOG = Logger.getLogger(SecurityTools.class);
 
     @Inject
     SecurityDataClient securityData;
@@ -103,7 +100,7 @@ public class SecurityTools {
                     detail,
                     Map.<MetaKey, Object>of());
         } catch (Exception e) {
-            return toErrorResponse("CVE lookup failed", e);
+            return ToolErrors.toResponse("CVE lookup failed", e);
         }
     }
 
@@ -159,15 +156,10 @@ public class SecurityTools {
                     detail,
                     Map.<MetaKey, Object>of());
         } catch (Exception e) {
-            return toErrorResponse("Life cycle lookup failed", e);
+            return ToolErrors.toResponse("Life cycle lookup failed", e);
         }
     }
 
-    /**
-     * These tools take no credential, so the limiter separates callers by identity or
-     * remote address instead. A constant key here would give every caller one shared
-     * bucket — the very starvation the limiter exists to prevent.
-     */
     /**
      * Rejects an argument that is absent or implausibly long.
      *
@@ -186,6 +178,11 @@ public class SecurityTools {
         return Optional.empty();
     }
 
+    /**
+     * These tools take no credential, so the limiter separates callers by identity or
+     * remote address instead. A constant key here would give every caller one shared
+     * bucket — the very starvation the limiter exists to prevent.
+     */
     private Optional<ToolResponse> enforceRateLimit(String tool) {
         if (rateLimiter.tryAcquire()) {
             return Optional.empty();
@@ -195,15 +192,4 @@ public class SecurityTools {
         return Optional.of(ToolResponse.error("Error: " + reason + ". Wait a moment before retrying."));
     }
 
-    /**
-     * Only messages from our own typed exceptions are relayed; anything else could carry
-     * response bodies, so the detail goes to the log instead.
-     */
-    private ToolResponse toErrorResponse(String context, Exception e) {
-        LOG.errorf(e, "%s", context);
-        if (e instanceof KnowledgeBaseException) {
-            return ToolResponse.error("Error: " + e.getMessage());
-        }
-        return ToolResponse.error("Error: " + context + ". Check the server logs for details.");
-    }
 }

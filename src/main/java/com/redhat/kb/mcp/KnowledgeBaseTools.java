@@ -138,7 +138,7 @@ public class KnowledgeBaseTools {
                     structured,
                     Map.of());
         } catch (Exception e) {
-            return toErrorResponse("Search failed", e);
+            return ToolErrors.toResponse("Search failed", e);
         }
     }
 
@@ -161,7 +161,11 @@ public class KnowledgeBaseTools {
     public ToolResponse getArticle(
             @ToolArg(description = "An ID from search results: an article number such as '5049001', "
                     + "or an advisory such as 'RHSA-2026:6565'. Documentation entries are identified "
-                    + "by URL and are read from that link instead.") String articleId) {
+                    + "by URL and are read from that link instead.") String articleId,
+            @ToolArg(description = "The kind shown in brackets next to that ID in the search results "
+                    + "('Solution', 'Vulnerability', 'Errata'...). Ids are reused across kinds, so "
+                    + "passing it is what stops an unrelated document being returned.",
+                    defaultValue = "", required = false) String documentKind) {
 
         Optional<ToolResponse> rejection = validate("articleId", articleId);
         if (rejection.isPresent()) {
@@ -176,7 +180,8 @@ public class KnowledgeBaseTools {
             }
             audit.record("getArticle", articleId, credential.fingerprint());
 
-            return knowledgeBase.getArticle(credential, articleId.strip())
+            return knowledgeBase.getArticle(credential, articleId.strip(),
+                    normalizeDocumentType(documentKind))
                     .map(article -> {
                         ArticleDetail structured = ArticleFormatter.toArticleDetail(article);
                         return new ToolResponse(
@@ -188,7 +193,7 @@ public class KnowledgeBaseTools {
                     .orElseGet(() -> ToolResponse.error(
                             "Error: no article found with ID " + articleId.strip()));
         } catch (Exception e) {
-            return toErrorResponse("Could not retrieve the article", e);
+            return ToolErrors.toResponse("Could not retrieve the article", e);
         }
     }
 
@@ -225,23 +230,6 @@ public class KnowledgeBaseTools {
                 "Error: " + reason + ". Wait a moment before retrying."));
     }
 
-    /**
-     * Builds the client-facing error. Only messages from our own typed exceptions are
-     * relayed, since arbitrary exception messages may carry response bodies or credentials;
-     * the full detail goes to the log.
-     */
-    private ToolResponse toErrorResponse(String context, Exception e) {
-        if (e instanceof MissingCredentialException) {
-            // Actionable configuration problem, not a server fault: no stack trace.
-            LOG.debugf("Request without a usable Red Hat credential: %s", e.getMessage());
-            return ToolResponse.error("Error: " + e.getMessage());
-        }
-        LOG.errorf(e, "%s", context);
-        if (e instanceof KnowledgeBaseException || e instanceof AuthenticationException) {
-            return ToolResponse.error("Error: " + e.getMessage());
-        }
-        return ToolResponse.error("Error: " + context + ". Check the server logs for details.");
-    }
 
     private static int clampMaxResults(Integer requested) {
         if (requested == null) {

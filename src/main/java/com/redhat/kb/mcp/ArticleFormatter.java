@@ -95,7 +95,9 @@ final class ArticleFormatter {
                 // same failure while only the recent one matches a supported version.
                 sb.append('(').append(article.lastModified()).append(") ");
             }
-            sb.append(article.title()).append('\n');
+            // A few document kinds publish no title; saying so beats a line that trails off
+            // after the ID and reads as truncated output.
+            sb.append(article.title().isEmpty() ? "(untitled)" : article.title()).append('\n');
 
             if (!article.summary().isEmpty()) {
                 sb.append("    ").append(article.summary()).append('\n');
@@ -145,7 +147,11 @@ final class ArticleFormatter {
         StringBuilder sb = new StringBuilder();
         sb.append("=== ").append(detail.documentKind()).append(" ===\n\n");
         sb.append("ID: ").append(detail.id()).append('\n');
-        sb.append("Title: ").append(detail.title()).append('\n');
+        // Not every document kind carries a title — some Discussion entries have none — and
+        // an empty "Title:" line reads as a title the server failed to fetch.
+        if (!detail.title().isEmpty()) {
+            sb.append("Title: ").append(detail.title()).append('\n');
+        }
         sb.append("URL: ").append(detail.url()).append('\n');
 
         if (!detail.products().isEmpty()) {

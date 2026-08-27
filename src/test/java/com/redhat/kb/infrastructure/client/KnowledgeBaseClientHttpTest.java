@@ -92,7 +92,7 @@ class KnowledgeBaseClientHttpTest {
         server.respond(200, """
                 {"response":{"numFound":1,"docs":[{"id":"12345","title":"Some solution"}]}}""");
 
-        assertEquals("12345", client.getArticle(credential, "12345").orElseThrow().getId());
+        assertEquals("12345", client.getArticle(credential, "12345", "").orElseThrow().getId());
     }
 
     @Test
@@ -132,7 +132,7 @@ class KnowledgeBaseClientHttpTest {
         server.respond(200, """
                 {"response":{"numFound":10,"docs":[{"id":"7078571","title":"Something else"}]}}""");
 
-        assertTrue(client.getArticle(credential, "999999999").isEmpty(),
+        assertTrue(client.getArticle(credential, "999999999", "").isEmpty(),
                 "a document with a different id must not be returned as the one requested");
     }
 
@@ -147,7 +147,7 @@ class KnowledgeBaseClientHttpTest {
                   {"id":"33098","documentKind":"Solution","title":"Real answer",
                    "issue":["a problem"],"solution_resolution":["do this"]}]}}""");
 
-        assertEquals("Real answer", client.getArticle(credential, "33098").orElseThrow().getTitle());
+        assertEquals("Real answer", client.getArticle(credential, "33098", "").orElseThrow().getTitle());
     }
 
     @Test
@@ -156,7 +156,7 @@ class KnowledgeBaseClientHttpTest {
         server.respond(200, """
                 {"response":{"numFound":1,"docs":[{"id":"12345","title":"Some solution"}]}}""");
 
-        client.getArticle(credential, "12345");
+        client.getArticle(credential, "12345", "");
 
         String uri = server.lastRequestUri().orElseThrow().toString();
         assertTrue(uri.contains("fq=id%3A%2212345%22"), "expected an exact id filter, got: " + uri);
@@ -164,10 +164,26 @@ class KnowledgeBaseClientHttpTest {
     }
 
     @Test
+    @DisplayName("returns the kind the caller asked for when an id spans several")
+    void getArticlePrefersTheRequestedKind() {
+        // Found against the live API: 33065 is both an OpenSSL Vulnerability and an
+        // unrelated JBoss Solution. Ranking by content would answer the Vulnerability with
+        // the Solution, since only Solutions carry a resolution field.
+        server.respond(200, """
+                {"response":{"numFound":2,"docs":[
+                  {"id":"33065","documentKind":"Solution","title":"JBoss EAP start-up",
+                   "issue":["x"],"solution_resolution":["y"]},
+                  {"id":"33065","documentKind":"Vulnerability","title":"OpenSSL CCS Injection"}]}}""");
+
+        assertEquals("OpenSSL CCS Injection",
+                client.getArticle(credential, "33065", "Vulnerability").orElseThrow().getTitle());
+    }
+
+    @Test
     @DisplayName("rejects a non-numeric article ID before any request is made")
     void getArticleRejectsInvalidIdWithoutCallingTheApi() {
         KnowledgeBaseException e = assertThrows(KnowledgeBaseException.class,
-                () -> client.getArticle(credential, "abc; drop"));
+                () -> client.getArticle(credential, "abc; drop", ""));
 
         assertTrue(e.getMessage().startsWith("Article ID must be numeric"), e.getMessage());
         assertTrue(server.lastRequestUri().isEmpty(), "the invalid ID still reached the API");

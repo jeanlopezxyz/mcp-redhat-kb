@@ -99,9 +99,14 @@ public class KnowledgeBaseClient {
 
     /**
      * Gets the full details of an article by its ID.
+     *
+     * @param documentKind the kind the caller saw in the search results, or empty when it
+     *        does not know one. Ids are shared across kinds, so this is what keeps a
+     *        Vulnerability lookup from being answered with an unrelated Solution.
      */
     @CacheResult(cacheName = "kb-article")
-    public Optional<KnowledgeBaseArticle> getArticle(RedHatCredential credential, String articleId) {
+    public Optional<KnowledgeBaseArticle> getArticle(
+            RedHatCredential credential, String articleId, String documentKind) {
         if (!SolrQuery.isValidArticleId(articleId)) {
             throw new KnowledgeBaseException(
                     "Article ID must be numeric (e.g. 7136675) or an advisory (e.g. RHSA-2026:6565)");
@@ -112,11 +117,6 @@ public class KnowledgeBaseClient {
         // article than the one asked for. `fq` filters exactly and returns nothing when the
         // id does not exist.
         //
-        // An id is not unique either: 33098 matches seven documents — one Solution, five
-        // translations of a Vulnerability, and an empty Certification stub. Restricting to
-        // English drops the translations, and the ranking below picks the one that carries
-        // an answer rather than whichever Hydra happened to list first.
-        //
         // The id is quoted because an advisory carries a colon (RHSA-2026:6565), which Solr
         // would otherwise read as the start of another field.
         String url = baseUrl
@@ -125,18 +125,43 @@ public class KnowledgeBaseClient {
                 + "&fq=" + encode("language:en")
                 + "&fl=" + DETAIL_FIELDS;
 
-        return extractDocs(execute(credential, url, "fetch the article")).stream()
+        List<KnowledgeBaseArticle> matches = extractDocs(execute(credential, url, "fetch the article"))
+                .stream()
                 // Belt and braces: never return an article whose id is not the one asked
                 // for, whatever the filter did upstream.
                 .filter(article -> articleId.equals(article.getId()))
-                .max(Comparator.comparingInt(KnowledgeBaseClient::readableContent));
+                .toList();
+
+        return pick(matches, documentKind);
+    }
+
+    /**
+     * Chooses among documents sharing an id.
+     *
+     * <p>Ids are not unique across document kinds: 33065 is both a Vulnerability about
+     * OpenSSL and an unrelated JBoss Solution. Ranking by how much content a record carries
+     * would answer the Vulnerability with the Solution, because only Solutions have a
+     * resolution field — so the kind the caller saw in the search results decides instead,
+     * and it is only a tie-break when nothing matches it.
+     */
+    private static Optional<KnowledgeBaseArticle> pick(
+            List<KnowledgeBaseArticle> matches, String documentKind) {
+        if (documentKind != null && !documentKind.isBlank()) {
+            Optional<KnowledgeBaseArticle> ofKind = matches.stream()
+                    .filter(article -> documentKind.equalsIgnoreCase(article.getDocumentKind()))
+                    .findFirst();
+            if (ofKind.isPresent()) {
+                return ofKind;
+            }
+        }
+        // No kind asked for, or none matched: prefer the record that actually says
+        // something over an empty stub — id 33098 lists a blank Certification first.
+        return matches.stream().max(Comparator.comparingInt(KnowledgeBaseClient::readableContent));
     }
 
     /**
      * Scores how much of an answer a document carries, to break a tie between records
-     * sharing an id. A resolution outranks a problem statement, which outranks a bare
-     * title: the alternative is returning whichever one Hydra listed first, which for
-     * id 33098 is an empty Certification stub.
+     * sharing an id. A resolution outranks a problem statement, which outranks a bare title.
      */
     private static int readableContent(KnowledgeBaseArticle article) {
         int score = 0;
