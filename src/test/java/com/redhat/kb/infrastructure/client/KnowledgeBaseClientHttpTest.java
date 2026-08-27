@@ -90,12 +90,53 @@ class KnowledgeBaseClientHttpTest {
     }
 
     @Test
+    @DisplayName("never returns an article other than the one asked for")
+    void getArticleRefusesAMismatchedDocument() {
+        // Regression, found against the live API: `q=id:<n>` is scored free-text search
+        // rather than a lookup, so an unknown id came back with ten unrelated articles and
+        // the caller was handed the first of them. Answering the wrong article is worse
+        // than answering nothing — the model cannot tell it was served a different one.
+        server.respond(200, """
+                {"response":{"numFound":10,"docs":[{"id":"7078571","title":"Something else"}]}}""");
+
+        assertTrue(client.getArticle(credential, "999999999").isEmpty(),
+                "a document with a different id must not be returned as the one requested");
+    }
+
+    @Test
+    @DisplayName("picks the document that carries an answer when an id is not unique")
+    void getArticlePrefersTheDocumentWithContent() {
+        // Ids are not unique: 33098 returns an empty Certification stub, five translations
+        // of a Vulnerability and one Solution. Hydra listed the empty stub first.
+        server.respond(200, """
+                {"response":{"numFound":2,"docs":[
+                  {"id":"33098","documentKind":"Certification"},
+                  {"id":"33098","documentKind":"Solution","title":"Real answer",
+                   "issue":["a problem"],"solution_resolution":["do this"]}]}}""");
+
+        assertEquals("Real answer", client.getArticle(credential, "33098").orElseThrow().getTitle());
+    }
+
+    @Test
+    @DisplayName("looks the article up exactly, in English only")
+    void getArticleFiltersExactly() {
+        server.respond(200, """
+                {"response":{"numFound":1,"docs":[{"id":"12345","title":"Some solution"}]}}""");
+
+        client.getArticle(credential, "12345");
+
+        String uri = server.lastRequestUri().orElseThrow().toString();
+        assertTrue(uri.contains("fq=id%3A%2212345%22"), "expected an exact id filter, got: " + uri);
+        assertTrue(uri.contains("language%3Aen"), "expected the language filter, got: " + uri);
+    }
+
+    @Test
     @DisplayName("rejects a non-numeric article ID before any request is made")
     void getArticleRejectsInvalidIdWithoutCallingTheApi() {
         KnowledgeBaseException e = assertThrows(KnowledgeBaseException.class,
                 () -> client.getArticle(credential, "abc; drop"));
 
-        assertEquals("Article ID must be numeric", e.getMessage());
+        assertTrue(e.getMessage().startsWith("Article ID must be numeric"), e.getMessage());
         assertTrue(server.lastRequestUri().isEmpty(), "the invalid ID still reached the API");
     }
 

@@ -2,6 +2,7 @@ package com.redhat.kb.infrastructure.client;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -70,6 +71,9 @@ public class KnowledgeBaseClient {
         urlBuilder.append("?q=").append(encode(SolrQuery.escape(query)));
         urlBuilder.append("&rows=").append(maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS);
         urlBuilder.append("&fl=").append(SEARCH_FIELDS);
+        // Documentation is published in several languages under the same title, so without
+        // this a page of results is padded with Japanese and Korean copies of one article.
+        urlBuilder.append("&fq=").append(encode("language:en"));
 
         if (product != null && !product.isBlank()) {
             // Matched as a phrase, so the value has to be the product's full name.
@@ -92,14 +96,53 @@ public class KnowledgeBaseClient {
     @CacheResult(cacheName = "kb-article")
     public Optional<KnowledgeBaseArticleDto> getArticle(RedHatCredential credential, String articleId) {
         if (!SolrQuery.isValidArticleId(articleId)) {
-            throw new KnowledgeBaseException("Article ID must be numeric");
+            throw new KnowledgeBaseException(
+                    "Article ID must be numeric (e.g. 7136675) or an advisory (e.g. RHSA-2026:6565)");
         }
 
+        // `q=id:<n>` is scored free-text search, not a lookup: Hydra answers an unknown id
+        // with ten unrelated articles, and taking the first one hands the model a different
+        // article than the one asked for. `fq` filters exactly and returns nothing when the
+        // id does not exist.
+        //
+        // An id is not unique either: 33098 matches seven documents — one Solution, five
+        // translations of a Vulnerability, and an empty Certification stub. Restricting to
+        // English drops the translations, and the ranking below picks the one that carries
+        // an answer rather than whichever Hydra happened to list first.
+        //
+        // The id is quoted because an advisory carries a colon (RHSA-2026:6565), which Solr
+        // would otherwise read as the start of another field.
         String url = baseUrl
-                + "?q=" + encode("id:" + articleId)
+                + "?q=" + encode("*:*")
+                + "&fq=" + encode("id:\"" + articleId + "\"")
+                + "&fq=" + encode("language:en")
                 + "&fl=" + DETAIL_FIELDS;
 
-        return extractDocs(execute(credential, url, "fetch the article")).stream().findFirst();
+        return extractDocs(execute(credential, url, "fetch the article")).stream()
+                // Belt and braces: never return an article whose id is not the one asked
+                // for, whatever the filter did upstream.
+                .filter(article -> articleId.equals(article.getId()))
+                .max(Comparator.comparingInt(KnowledgeBaseClient::readableContent));
+    }
+
+    /**
+     * Scores how much of an answer a document carries, to break a tie between records
+     * sharing an id. A resolution outranks a problem statement, which outranks a bare
+     * title: the alternative is returning whichever one Hydra listed first, which for
+     * id 33098 is an empty Certification stub.
+     */
+    private static int readableContent(KnowledgeBaseArticleDto article) {
+        int score = 0;
+        if (article.getSolutionResolution() != null) {
+            score += 4;
+        }
+        if (article.getIssue() != null) {
+            score += 2;
+        }
+        if (article.getTitle() != null && !article.getTitle().isBlank()) {
+            score += 1;
+        }
+        return score;
     }
 
     /**

@@ -2,6 +2,8 @@ package com.redhat.kb.mcp;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -17,6 +19,9 @@ final class SecurityFormatter {
     /** Cap on how many entries of a list are rendered, to bound a widely-affecting CVE. */
     private static final int MAX_ENTRIES = 25;
 
+    /** Mirrors the validation in SecurityDataClient; the id in the body is not trusted. */
+    private static final Pattern CVE_ID = Pattern.compile("CVE-\\d{4}-\\d{4,19}", Pattern.CASE_INSENSITIVE);
+
     private SecurityFormatter() {
         // Utility class
     }
@@ -30,9 +35,9 @@ final class SecurityFormatter {
                 break;
             }
             fixed.add(new CveDetail.AffectedRelease(
-                    text(release, "product_name"),
-                    text(release, "advisory"),
-                    text(release, "package")));
+                    ContentSanitizer.clean(text(release, "product_name")),
+                    ContentSanitizer.clean(text(release, "advisory")),
+                    ContentSanitizer.clean(text(release, "package"))));
         }
 
         List<CveDetail.PackageState> unfixed = new ArrayList<>();
@@ -41,20 +46,35 @@ final class SecurityFormatter {
                 break;
             }
             unfixed.add(new CveDetail.PackageState(
-                    text(state, "product_name"),
-                    text(state, "fix_state"),
-                    text(state, "package_name")));
+                    ContentSanitizer.clean(text(state, "product_name")),
+                    ContentSanitizer.clean(text(state, "fix_state")),
+                    ContentSanitizer.clean(text(state, "package_name"))));
         }
 
+        // The id, severity and score render outside the fence, as the server's own header,
+        // so they are sanitized too: a tampered record must not be able to inject markers
+        // into the one part of the answer the model reads as trusted.
         return new CveDetail(
-                text(cve, "name"),
-                text(cve, "threat_severity"),
-                cve.path("cvss3").path("cvss3_base_score").asText(""),
+                ContentSanitizer.clean(text(cve, "name")),
+                ContentSanitizer.clean(text(cve, "threat_severity")),
+                ContentSanitizer.clean(cve.path("cvss3").path("cvss3_base_score").asText("")),
                 ContentSanitizer.clean(joinArray(cve.path("details"))),
                 fixed,
                 unfixed,
                 ContentSanitizer.clean(joinArray(cve.path("mitigation").path("value"))),
-                "https://access.redhat.com/security/cve/" + text(cve, "name").toLowerCase());
+                cveUrl(text(cve, "name")));
+    }
+
+    /**
+     * Builds the advisory URL only from a well-formed CVE id. The id arrives in the
+     * response body, so interpolating it unchecked would let a tampered record point the
+     * model at an arbitrary path under the Red Hat domain.
+     */
+    private static String cveUrl(String name) {
+        if (!CVE_ID.matcher(name).matches()) {
+            return "";
+        }
+        return "https://access.redhat.com/security/cve/" + name.toLowerCase(Locale.ROOT);
     }
 
     static String formatCve(CveDetail cve) {
@@ -119,13 +139,14 @@ final class SecurityFormatter {
         List<LifecycleDetail.Version> versions = new ArrayList<>();
         for (JsonNode version : product.path("versions")) {
             versions.add(new LifecycleDetail.Version(
-                    text(version, "name"),
-                    text(version, "type"),
+                    ContentSanitizer.clean(text(version, "name")),
+                    ContentSanitizer.clean(text(version, "type")),
                     phaseEnd(version, "General availability"),
                     phaseEnd(version, "Full support"),
                     phaseEnd(version, "Maintenance support")));
         }
-        return new LifecycleDetail(text(product, "name"), versions);
+        return new LifecycleDetail(
+                ContentSanitizer.clean(text(product, "name")), versions);
     }
 
     static String formatLifecycle(LifecycleDetail detail) {
@@ -137,15 +158,30 @@ final class SecurityFormatter {
             return sb.toString();
         }
 
-        sb.append(String.format("%-10s %-24s %-12s %s%n", "VERSION", "PHASE", "GA", "END OF MAINTENANCE"));
+        // Product and version names are free text from the Life Cycle API, so the table
+        // gets the same nonce fence as CVEs and articles. The heading labels are ours.
+        StringBuilder body = new StringBuilder();
+        body.append(String.format("%-10s %-24s %-12s %s%n", "VERSION", "PHASE", "GA", "END OF MAINTENANCE"));
         for (LifecycleDetail.Version v : detail.versions()) {
-            sb.append(String.format("%-10s %-24s %-12s %s%n",
+            body.append(String.format("%-10s %-24s %-12s %s%n",
                     v.version(),
                     truncate(v.supportType(), 24),
                     date(v.generalAvailability()),
                     date(v.endOfMaintenance())));
         }
+
+        UntrustedFence fence = UntrustedFence.newFence();
+        sb.append(fence.open()).append('\n');
+        sb.append(body);
+        sb.append(fence.close()).append('\n');
+
+        // Our own conclusion, not upstream data: it stays outside the fence.
         sb.append("\nEnd of maintenance is the practical end of support for a version.\n");
+        // Red Hat publishes only versions still in a support phase, so a version's absence
+        // is the answer to "is it still supported?" — say so, or a model asked about
+        // RHEL 7 sees a table without it and cannot tell "out of support" from "no data".
+        sb.append("Only versions still under a support phase are listed; one absent from "
+                + "this table has reached end of maintenance.\n");
         return sb.toString();
     }
 
