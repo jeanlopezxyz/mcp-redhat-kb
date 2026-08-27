@@ -9,11 +9,17 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -42,7 +48,10 @@ public class RedHatAuthClient {
      * authority: re-checking periodically limits the window in which a revoked token would
      * still be used.
      */
-    private static final Duration MAX_CACHE_DURATION = Duration.ofMinutes(15);
+    private static final Duration MAX_CACHE_DURATION = Duration.ofMinutes(5);
+
+    /** Guards against a stalled SSO holding a caller for the whole request. */
+    private static final Duration REFRESH_TIMEOUT = Duration.ofSeconds(90);
 
     /** Bounds the cache so a stream of distinct credentials cannot exhaust memory. */
     private static final int MAX_CACHED_CREDENTIALS = 500;
@@ -58,8 +67,22 @@ public class RedHatAuthClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    /** Keyed by credential fingerprint, never by the token itself. */
-    private final Map<String, TokenState> tokenCache = new ConcurrentHashMap<>();
+    /**
+     * Keyed by credential fingerprint, never by the token itself. Caffeine enforces the
+     * size bound unconditionally, where a plain map swept for expired entries only shrinks
+     * when entries happen to be stale — a burst of distinct credentials that are all still
+     * valid would grow it past any limit.
+     */
+    private final Cache<String, TokenState> tokenCache = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHED_CREDENTIALS)
+            .expireAfterWrite(MAX_CACHE_DURATION)
+            .build();
+
+    /**
+     * Refreshes currently running, so concurrent callers for the same credential join the
+     * one in flight instead of each opening its own SSO round trip.
+     */
+    private final ConcurrentMap<String, CompletableFuture<TokenState>> inFlight = new ConcurrentHashMap<>();
 
     @Inject
     public RedHatAuthClient(RedHatApiConfig config, ObjectMapper objectMapper) {
@@ -75,29 +98,39 @@ public class RedHatAuthClient {
      * one is missing or expired.
      */
     public String getAccessToken(RedHatCredential credential) {
-        TokenState cached = tokenCache.get(credential.fingerprint());
+        String fingerprint = credential.fingerprint();
+        TokenState cached = tokenCache.getIfPresent(fingerprint);
         if (cached != null && cached.isValid()) {
             return cached.token();
         }
 
-        if (tokenCache.size() >= MAX_CACHED_CREDENTIALS) {
-            evictExpired();
-        }
+        // The SSO round trip runs outside the cache's per-key lock: holding it across a
+        // network call would stall every other credential mapping to the same lock stripe
+        // for as long as SSO takes to answer.
+        CompletableFuture<TokenState> refresh = inFlight.computeIfAbsent(
+                fingerprint,
+                key -> CompletableFuture.supplyAsync(() -> exchange(credential)));
 
-        // compute() holds a per-key lock, so concurrent calls for the same credential
-        // result in a single SSO round trip while other credentials proceed unblocked.
-        TokenState state = tokenCache.compute(credential.fingerprint(), (key, existing) -> {
-            if (existing != null && existing.isValid()) {
-                return existing;
+        try {
+            TokenState state = refresh.get(REFRESH_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+            tokenCache.put(fingerprint, state);
+            return state.token();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AuthenticationException("Interrupted while refreshing the access token");
+        } catch (TimeoutException e) {
+            LOG.errorf("Timed out refreshing the access token for credential %s", fingerprint);
+            throw new AuthenticationException("Timed out refreshing the access token");
+        } catch (ExecutionException e) {
+            // Unwrap so callers keep seeing the typed failure exchange() raised.
+            if (e.getCause() instanceof RuntimeException cause) {
+                throw cause;
             }
-            return exchange(credential);
-        });
-
-        return state.token();
-    }
-
-    private void evictExpired() {
-        tokenCache.values().removeIf(state -> !state.isValid());
+            LOG.errorf(e.getCause(), "Could not refresh the token for credential %s", fingerprint);
+            throw new AuthenticationException("Could not refresh the access token");
+        } finally {
+            inFlight.remove(fingerprint, refresh);
+        }
     }
 
     /**
