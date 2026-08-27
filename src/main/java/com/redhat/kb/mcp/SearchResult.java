@@ -28,6 +28,9 @@ public record SearchResult(
             @JsonPropertyDescription("Article title") String title,
             @JsonPropertyDescription("Document kind: Solution, Documentation or Article") String documentKind,
             @JsonPropertyDescription("Canonical article URL") String url,
-            @JsonPropertyDescription("Short abstract, truncated") String summary) {
+            @JsonPropertyDescription("Short abstract, truncated") String summary,
+            @JsonPropertyDescription("Date the article was last modified (YYYY-MM-DD), empty when "
+                    + "upstream does not report one; prefer the more recent of two articles that "
+                    + "otherwise apply equally") String lastModified) {
     }
 }

@@ -19,6 +19,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
+
 /**
  * MCP tools backed by Red Hat's public product APIs.
  *
@@ -65,8 +67,10 @@ public class SecurityTools {
     public ToolResponse lookupCve(
             @ToolArg(description = "CVE identifier, e.g. 'CVE-2024-6387'") String cveId) {
 
-        if (cveId == null || cveId.isBlank()) {
-            return ToolResponse.error("Error: cveId is required, for example CVE-2024-6387");
+        Optional<ToolResponse> rejection = validate("cveId", cveId,
+                "Error: cveId is required, for example CVE-2024-6387");
+        if (rejection.isPresent()) {
+            return rejection.get();
         }
 
         Optional<ToolResponse> throttled = enforceRateLimit("lookupCve");
@@ -121,8 +125,10 @@ public class SecurityTools {
             @ToolArg(description = "Full product name, e.g. 'Red Hat OpenShift Container Platform'")
             String product) {
 
-        if (product == null || product.isBlank()) {
-            return ToolResponse.error("Error: product is required");
+        Optional<ToolResponse> rejection = validate("product", product,
+                "Error: product is required");
+        if (rejection.isPresent()) {
+            return rejection.get();
         }
 
         Optional<ToolResponse> throttled = enforceRateLimit("getProductLifecycle");
@@ -159,6 +165,24 @@ public class SecurityTools {
      * remote address instead. A constant key here would give every caller one shared
      * bucket — the very starvation the limiter exists to prevent.
      */
+    /**
+     * Rejects an argument that is absent or implausibly long.
+     *
+     * <p>The length cap matters as much here as on the Knowledge Base tools: without it a
+     * megabyte-long product name would consume this caller's rate-limit budget and be
+     * URL-encoded into an upstream request before anything noticed.
+     */
+    private Optional<ToolResponse> validate(String argName, String value, String missingMessage) {
+        if (value == null || value.isBlank()) {
+            return Optional.of(ToolResponse.error(missingMessage));
+        }
+        if (value.length() > MAX_QUERY_LENGTH) {
+            return Optional.of(ToolResponse.error(
+                    "Error: " + argName + " too long (max " + MAX_QUERY_LENGTH + " chars)"));
+        }
+        return Optional.empty();
+    }
+
     private Optional<ToolResponse> enforceRateLimit(String tool) {
         if (rateLimiter.tryAcquire()) {
             return Optional.empty();

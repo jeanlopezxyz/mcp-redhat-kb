@@ -50,9 +50,10 @@ final class ArticleFormatter {
                 .map(a -> new SearchResult.Article(
                         a.getId(),
                         ContentSanitizer.clean(a.getTitle()),
-                        defaultIfBlank(a.getDocumentKind(), "Article"),
+                        defaultIfBlank(ContentSanitizer.clean(a.getDocumentKind()), "Article"),
                         safeUrl(a),
-                        ContentSanitizer.truncate(ContentSanitizer.clean(a.getAbstractText()), MAX_SUMMARY_CHARS)))
+                        ContentSanitizer.truncate(ContentSanitizer.clean(a.getAbstractText()), MAX_SUMMARY_CHARS),
+                        calendarDay(a.getLastModifiedDate())))
                 .toList();
         return new SearchResult(articles.size(), page.totalFound(), articles);
     }
@@ -85,8 +86,13 @@ final class ArticleFormatter {
         sb.append(fence.open()).append('\n');
 
         for (SearchResult.Article article : result.articles()) {
-            sb.append(article.id()).append(" [").append(article.documentKind()).append("] ")
-              .append(article.title()).append('\n');
+            sb.append(article.id()).append(" [").append(article.documentKind()).append("] ");
+            if (!article.lastModified().isEmpty()) {
+                // Age is a tie-breaker the title cannot carry: two articles can describe the
+                // same failure while only the recent one matches a supported version.
+                sb.append('(').append(article.lastModified()).append(") ");
+            }
+            sb.append(article.title()).append('\n');
 
             if (!article.summary().isEmpty()) {
                 sb.append("    ").append(article.summary()).append('\n');
@@ -117,7 +123,7 @@ final class ArticleFormatter {
         return new ArticleDetail(
                 article.getId(),
                 ContentSanitizer.clean(article.getTitle()),
-                defaultIfBlank(article.getDocumentKind(), "Article"),
+                defaultIfBlank(ContentSanitizer.clean(article.getDocumentKind()), "Article"),
                 safeUrl(article),
                 ContentSanitizer.clean(article.getProduct()),
                 sections.get("Environment"),
@@ -240,6 +246,18 @@ final class ArticleFormatter {
             }
         }
         return article.getId() != null ? ARTICLE_BASE_URL + article.getId() : "N/A";
+    }
+
+    /**
+     * Keeps the calendar day of an upstream timestamp ({@code 2024-06-13T23:37:19Z}). The
+     * time of day says nothing about how current an article is and costs tokens per result.
+     */
+    private static String calendarDay(String timestamp) {
+        if (timestamp == null || timestamp.length() < 10) {
+            return "";
+        }
+        String day = timestamp.substring(0, 10);
+        return day.matches("\\d{4}-\\d{2}-\\d{2}") ? day : "";
     }
 
     private static String defaultIfBlank(String value, String fallback) {

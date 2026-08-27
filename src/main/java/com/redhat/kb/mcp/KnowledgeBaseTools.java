@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -53,11 +54,19 @@ public class KnowledgeBaseTools {
                     Search the Red Hat Knowledge Base for solutions, documentation and articles.
                     Works with error messages, log excerpts, Prometheus/OpenShift alert names \
                     (e.g. 'KubePodCrashLooping') and general technical topics.
+                    Query with the distinctive words of the problem - the failing component \
+                    plus the error text - rather than one broad term: 'etcd' matches over \
+                    20000 articles, 'etcd members are unhealthy after upgrade' about 300. \
+                    Plain keywords only; boolean operators and field:value syntax are \
+                    escaped, not interpreted.
                     Set documentType to 'Solution' when troubleshooting a failure, or \
                     'Documentation' when looking for how-to guides and best practices.
                     Reports how many articles matched in total, so a much larger total than \
                     the page returned means the query should be narrowed.
-                    Returns a compact list; call getArticle with an ID for the full text.""",
+                    Returns a compact list of ID, kind, date and abstract - not the article \
+                    bodies. Read it, pick the entry that matches the symptom, then call \
+                    getArticle with that ID. When several look alike, prefer the more \
+                    specific title and the more recent date.""",
             annotations = @Tool.Annotations(
                     readOnlyHint = true,
                     destructiveHint = false,
@@ -66,12 +75,17 @@ public class KnowledgeBaseTools {
             outputSchema = @Tool.OutputSchema(from = SearchResult.class))
     @Blocking
     public ToolResponse searchKnowledgeBase(
-            @ToolArg(description = "Search keywords, error message, or alert name") String query,
+            @ToolArg(description = "The distinctive words of the problem: failing component and "
+                    + "error text, e.g. 'etcd members unhealthy after upgrade'") String query,
             @ToolArg(description = "Max results, 1-25", defaultValue = "10", required = false) Integer maxResults,
-            @ToolArg(description = "Product filter, e.g. 'Red Hat OpenShift Container Platform' or "
-                    + "'Red Hat Enterprise Linux'. Omit to search all products.",
+            @ToolArg(description = "Product filter. Matched exactly, so it must be Red Hat's full "
+                    + "official name: 'Red Hat OpenShift Container Platform' works, 'OpenShift' "
+                    + "returns nothing. When unsure, omit it and put the product in the query "
+                    + "instead - an empty result page is indistinguishable from a wrong filter.",
                     defaultValue = "", required = false) String product,
-            @ToolArg(description = "Filter by type: 'Solution', 'Documentation' or 'Article'",
+            @ToolArg(description = "Filter by type: 'Solution' (a fix for a failure, the only kind "
+                    + "with root cause and resolution), 'Article' (background) or 'Documentation' "
+                    + "(product manuals, identified by URL rather than a numeric ID)",
                     defaultValue = "", required = false) String documentType) {
 
         Optional<ToolResponse> rejection = validate("query", query);
@@ -92,7 +106,7 @@ public class KnowledgeBaseTools {
                     query.strip(),
                     clampMaxResults(maxResults),
                     normalize(product),
-                    normalize(documentType));
+                    normalizeDocumentType(documentType));
 
             if (page.isEmpty()) {
                 // A declared output schema obliges every successful response to carry
@@ -229,5 +243,20 @@ public class KnowledgeBaseTools {
 
     private static String normalize(String value) {
         return value == null || value.isBlank() ? "" : value.strip();
+    }
+
+    /**
+     * Canonicalizes the document kind's capitalization.
+     *
+     * <p>Hydra matches {@code documentKind} exactly, so "solution" returns nothing while
+     * "Solution" returns thousands — an empty page that reads as "nothing is documented"
+     * rather than as a mistyped filter.
+     */
+    private static String normalizeDocumentType(String value) {
+        String kind = normalize(value);
+        if (kind.isEmpty()) {
+            return "";
+        }
+        return Character.toUpperCase(kind.charAt(0)) + kind.substring(1).toLowerCase(Locale.ROOT);
     }
 }

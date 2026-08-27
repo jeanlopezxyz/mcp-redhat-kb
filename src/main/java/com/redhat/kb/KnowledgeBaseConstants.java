@@ -24,8 +24,15 @@ public final class KnowledgeBaseConstants {
     public static final int MAX_SECTION_CHARS = 4000;
     /** Overall cap for a single article, roughly 4-5k tokens. */
     public static final int MAX_ARTICLE_CHARS = 15000;
-    /** Abstract length in search result summaries. */
-    public static final int MAX_SUMMARY_CHARS = 150;
+    /**
+     * Abstract length in search result summaries.
+     *
+     * <p>This is the budget the model spends deciding which article to open, so it pays for
+     * itself: a Knowledge Base of failures has many near-identical titles ("Pods in
+     * CrashLoopBackOff"), and at 150 characters the summary was cut before the symptom that
+     * tells them apart.
+     */
+    public static final int MAX_SUMMARY_CHARS = 300;
 
     /** Prefix of the marker appended to truncated content; also used to detect it. */
     public static final String TRUNCATION_MARKER = "[truncated -";
