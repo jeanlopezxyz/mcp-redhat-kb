@@ -5,6 +5,8 @@ import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,6 +29,9 @@ public class LifecycleClient {
     /** Most a response body may occupy; enforced while streaming, never after buffering. */
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
+    /** How many candidate names an ambiguity message lists before summarising. */
+    private static final int MAX_SUGGESTIONS = 5;
+
     /** How this API is bounded and named in failure messages the MCP client sees. */
     private static final BoundedJsonHttp.ApiProfile API = new BoundedJsonHttp.ApiProfile(
             MAX_RESPONSE_BYTES,
@@ -45,9 +50,12 @@ public class LifecycleClient {
     }
 
     /**
-     * Looks up the life cycle of a product by name.
+     * Looks up the life cycle of a product by its full official name.
      *
-     * @return the product record, or empty when no product matches that name
+     * @return the product record, or empty when nothing matches that name
+     * @throws KnowledgeBaseException when the name matches several products, since
+     *         answering with one of them would pass another product's dates off as the
+     *         answer with nothing marking the substitution
      */
     @CacheResult(cacheName = "lifecycle-lookup")
     public Optional<JsonNode> lookupProduct(String productName) {
@@ -65,8 +73,37 @@ public class LifecycleClient {
         }
 
         JsonNode data = http.readTree(response, API).path("data");
-        return data.isArray() && !data.isEmpty()
-                ? Optional.of(data.get(0))
-                : Optional.empty();
+        if (!data.isArray() || data.isEmpty()) {
+            return Optional.empty();
+        }
+
+        String requested = productName.strip();
+        for (JsonNode product : data) {
+            if (product.path("name").asText("").equalsIgnoreCase(requested)) {
+                return Optional.of(product);
+            }
+        }
+
+        // No exact match, and the API matches substrings: "OpenShift" returns thirteen
+        // products spanning Shipwright, logging and OCP itself. Answering with any one of
+        // them presents another product's end-of-life dates as the answer, and the caller
+        // cannot tell. Naming the candidates lets the model ask again with a full name.
+        throw new KnowledgeBaseException(ambiguousMatch(data, requested));
     }
+
+    /** Lists what the name matched, so the caller can retry with a full product name. */
+    private static String ambiguousMatch(JsonNode data, String requested) {
+        List<String> names = new ArrayList<>();
+        for (JsonNode product : data) {
+            if (names.size() == MAX_SUGGESTIONS) {
+                break;
+            }
+            names.add(product.path("name").asText(""));
+        }
+        String more = data.size() > names.size() ? ", and " + (data.size() - names.size()) + " more" : "";
+        return "\"" + requested + "\" matches " + data.size() + " products, so no life cycle was"
+                + " returned: it must be a product's full official name. Did you mean "
+                + String.join("; ", names) + more + "?";
+    }
+
 }

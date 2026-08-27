@@ -96,6 +96,33 @@ class KnowledgeBaseClientHttpTest {
     }
 
     @Test
+    @DisplayName("asks search for English only, so translations do not fill the page")
+    void searchRestrictsToEnglish() {
+        // Documentation is published in several languages under the same title: without
+        // this filter a page of results is padded with Japanese and Korean copies.
+        server.respond(200, EMPTY_RESULT);
+
+        client.search(credential, "gitops", 5, null, null);
+
+        assertTrue(server.lastRequestUri().orElseThrow().toString().contains("language%3Aen"),
+                "search must filter by language");
+    }
+
+    @Test
+    @DisplayName("filters a search by product and document kind exactly")
+    void searchAppliesFiltersExactly() {
+        // Both are matched exactly upstream, so a wrong value yields an empty page rather
+        // than an error. Pinning the encoding keeps that failure mode visible here.
+        server.respond(200, EMPTY_RESULT);
+
+        client.search(credential, "etcd", 5, "Red Hat OpenShift Container Platform", "Solution");
+
+        String uri = server.lastRequestUri().orElseThrow().toString();
+        assertTrue(uri.contains("fq=product:%22Red+Hat+OpenShift+Container+Platform%22"), uri);
+        assertTrue(uri.contains("fq=documentKind:%22Solution%22"), uri);
+    }
+
+    @Test
     @DisplayName("never returns an article other than the one asked for")
     void getArticleRefusesAMismatchedDocument() {
         // Regression, found against the live API: `q=id:<n>` is scored free-text search

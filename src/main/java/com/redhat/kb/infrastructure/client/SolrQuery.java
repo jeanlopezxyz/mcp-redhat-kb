@@ -39,7 +39,8 @@ final class SolrQuery {
     }
 
     /**
-     * Checks that an article ID is strictly numeric before it is interpolated into a query.
+     * Checks that an identifier is one this server knows how to look up — an article
+     * number or an advisory id — before it is interpolated into a query.
      */
     static boolean isValidArticleId(String articleId) {
         return articleId != null && ARTICLE_ID.matcher(articleId).matches();

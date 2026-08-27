@@ -146,8 +146,8 @@ public class KnowledgeBaseTools {
             name = "getArticle",
             title = "Get Knowledge Base article",
             description = "Retrieve the content of a Knowledge Base article: environment, issue, "
-                    + "root cause, diagnostic steps and resolution. Use a numeric article ID returned "
-                    + "by searchKnowledgeBase. Long articles are truncated. Without an entitled Red Hat "
+                    + "root cause, diagnostic steps and resolution. Use an ID returned by "
+                    + "searchKnowledgeBase. Long articles are truncated. Without an entitled Red Hat "
                     + "subscription the problem description is returned but the root cause, resolution "
                     + "and diagnostic steps are withheld; the response says so explicitly when that "
                     + "happens, so report it rather than concluding the article has no fix.",
@@ -159,7 +159,9 @@ public class KnowledgeBaseTools {
             outputSchema = @Tool.OutputSchema(from = ArticleDetail.class))
     @Blocking
     public ToolResponse getArticle(
-            @ToolArg(description = "Numeric article ID from search results, e.g. '5049001'") String articleId) {
+            @ToolArg(description = "An ID from search results: an article number such as '5049001', "
+                    + "or an advisory such as 'RHSA-2026:6565'. Documentation entries are identified "
+                    + "by URL and are read from that link instead.") String articleId) {
 
         Optional<ToolResponse> rejection = validate("articleId", articleId);
         if (rejection.isPresent()) {
