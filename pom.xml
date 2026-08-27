@@ -7,6 +7,7 @@
 
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <cyclonedx-plugin.version>2.9.1</cyclonedx-plugin.version>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -141,6 +142,36 @@
     </build>
 
     <profiles>
+        <!--
+            `./mvnw package -Psbom` writes a CycloneDX inventory of the JAR's dependencies.
+            The container image already ships one, but the released JAR did not, so a
+            consumer auditing it against a new advisory had nothing to read.
+        -->
+        <profile>
+            <id>sbom</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.cyclonedx</groupId>
+                        <artifactId>cyclonedx-maven-plugin</artifactId>
+                        <version>${cyclonedx-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals><goal>makeAggregateBom</goal></goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <outputName>sbom</outputName>
+                            <outputFormat>json</outputFormat>
+                            <includeTestScope>false</includeTestScope>
+                            <includeProvidedScope>false</includeProvidedScope>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <!--
             `./mvnw package -Pnative` builds the standalone executable. Without this
             profile the flag was silently ignored: Maven only warns about an unknown

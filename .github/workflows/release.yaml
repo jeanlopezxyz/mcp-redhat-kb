@@ -43,7 +43,7 @@ jobs:
         run: ./mvnw -B versions:set -DnewVersion=${GITHUB_REF_NAME#v} -DgenerateBackupPoms=false
 
       - name: Build JAR
-        run: ./mvnw package -B -Dquarkus.package.jar.type=uber-jar
+        run: ./mvnw package -B -Psbom -Dquarkus.package.jar.type=uber-jar
 
       # The uber-jar is only assembled here, so this is the first time its merged service
       # files are exercised. Starting it once catches a packaging break before release.
@@ -88,6 +88,7 @@ jobs:
             LICENSE
             target/mcp-redhat-kb.jar
             target/checksums.txt
+            target/sbom.json
 
   # ===========================================
   # Publish to npm
