@@ -1,6 +1,13 @@
 package com.redhat.kb.mcp;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+
+import com.sun.net.httpserver.HttpServer;
 
 import io.quarkiverse.mcp.server.test.McpAssured;
 import io.quarkiverse.mcp.server.test.McpAssured.McpStreamableTestClient;
@@ -27,13 +34,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestProfile(StructuredContentContractTest.OpenProfile.class)
 class StructuredContentContractTest {
 
+    /**
+     * Serves the two "nothing found" answers this contract is about, so the assertions
+     * depend on the empty-result branches rather than on Red Hat still having no record
+     * for a particular CVE. Previously these tests called the live API: they broke
+     * without a network and sent test traffic to production.
+     *
+     * <p>Started once for the profile because Quarkus reads the configuration before any
+     * test instance exists, so the port has to be known by then.
+     */
+    private static final HttpServer STUB = startStub();
+
+    private static HttpServer startStub() {
+        try {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            // The Security Data API answers 404 for a CVE it does not track.
+            server.createContext("/cve/", exchange -> respond(exchange, 404, ""));
+            // The Life Cycle API answers 200 with an empty data array for an unknown product.
+            server.createContext("/products", exchange -> respond(exchange, 200, "{\"data\":[]}"));
+            server.start();
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> server.stop(0)));
+            return server;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not start the stub API server", e);
+        }
+    }
+
+    private static void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+            throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        try (exchange; OutputStream out = exchange.getResponseBody()) {
+            exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
+            out.write(bytes);
+        }
+    }
+
+    private static String stubUrl() {
+        return "http://127.0.0.1:" + STUB.getAddress().getPort();
+    }
+
     public static class OpenProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                     "redhat.api.offline-token", "test-token",
                     "quarkus.oidc.enabled", "false",
-                    "quarkus.http.auth.permission.mcp.policy", "permit");
+                    "quarkus.http.auth.permission.mcp.policy", "permit",
+                    "redhat.api.urls.security-data", stubUrl(),
+                    "redhat.api.urls.lifecycle", stubUrl() + "/products");
         }
     }
 
@@ -47,7 +95,7 @@ class StructuredContentContractTest {
     @Test
     @DisplayName("returns structured content when no CVE record exists")
     void cveNotFoundCarriesStructuredContent() {
-        // CVE-1999-0001 predates Red Hat's tracking, so the API answers 404.
+        // The stub answers 404, as the real API does for a CVE Red Hat does not track.
         client.when()
                 .toolsCall("lookupCve", Map.of("cveId", "CVE-1999-0001"), response -> {
                     assertTrue(response.content().get(0).asText().text().contains("No Red Hat record"));

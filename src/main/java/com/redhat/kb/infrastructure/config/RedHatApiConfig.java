@@ -37,6 +37,15 @@ public interface RedHatApiConfig {
     Timeouts timeouts();
 
     /**
+     * Base URLs of the upstream Red Hat APIs.
+     *
+     * <p>Overridable so a test can point a client at a local stub and stay offline;
+     * production deployments have no reason to change them. The defaults are the values
+     * the clients previously hardcoded.
+     */
+    Urls urls();
+
+    /**
      * Checks if the service is properly configured.
      */
     default boolean isConfigured() {
@@ -62,5 +71,19 @@ public interface RedHatApiConfig {
 
         @WithDefault("60")
         int requestSeconds();
+    }
+
+    interface Urls {
+        /** Knowledge Base search (the credentialed Hydra API). */
+        @WithDefault("https://access.redhat.com/hydra/rest/search/kcs")
+        String knowledgeBase();
+
+        /** Security Data API (public CVE records, no credential). */
+        @WithDefault("https://access.redhat.com/hydra/rest/securitydata")
+        String securityData();
+
+        /** Product Life Cycle API (public support windows, no credential). */
+        @WithDefault("https://access.redhat.com/product-life-cycles/api/v1/products")
+        String lifecycle();
     }
 }

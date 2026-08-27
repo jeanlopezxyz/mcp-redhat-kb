@@ -1,18 +1,11 @@
 package com.redhat.kb.infrastructure.client;
 
-import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 
 import io.quarkus.cache.CacheResult;
@@ -31,25 +24,27 @@ import jakarta.ws.rs.core.Response;
 @ApplicationScoped
 public class SecurityDataClient {
 
-    private static final String BASE_URL = "https://access.redhat.com/hydra/rest/securitydata";
-
     /** CVE identifiers look like CVE-2024-6387. */
     private static final Pattern CVE_ID = Pattern.compile("CVE-\\d{4}-\\d{4,19}", Pattern.CASE_INSENSITIVE);
 
-    /** Guards against an oversized response exhausting the heap. */
+    /** Most a response body may occupy; enforced while streaming, never after buffering. */
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
-    private final RedHatApiConfig config;
+    /** How this API is bounded and named in failure messages the MCP client sees. */
+    private static final BoundedJsonHttp.ApiProfile API = new BoundedJsonHttp.ApiProfile(
+            MAX_RESPONSE_BYTES,
+            "Request to the Security Data API was interrupted",
+            "Could not reach the Red Hat Security Data API",
+            "Security Data response exceeded the size limit",
+            "Received a malformed response from the Security Data API");
+
+    private final String baseUrl;
+    private final BoundedJsonHttp http;
 
     @Inject
-    public SecurityDataClient(RedHatApiConfig config, ObjectMapper objectMapper) {
-        this.config = config;
-        this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(config.timeouts().connectSeconds()))
-                .build();
+    public SecurityDataClient(RedHatApiConfig config, BoundedJsonHttp http) {
+        this.baseUrl = config.urls().securityData();
+        this.http = http;
     }
 
     /**
@@ -62,39 +57,21 @@ public class SecurityDataClient {
     public Optional<JsonNode> lookupCve(String cveId) {
         String normalized = normalize(cveId);
 
-        String url = BASE_URL + "/cve/" + URLEncoder.encode(normalized, StandardCharsets.UTF_8) + ".json";
+        String url = baseUrl + "/cve/" + URLEncoder.encode(normalized, StandardCharsets.UTF_8) + ".json";
 
-        HttpResponse<String> response;
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Accept", "application/json")
-                    .GET()
-                    .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
-                    .build();
+        BoundedJsonHttp.ApiResponse response = http.get(url, API, "Accept", "application/json");
 
-            response = httpClient.send(request, boundedBodyHandler());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new KnowledgeBaseException("Request to the Security Data API was interrupted");
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Could not reach the Red Hat Security Data API");
-        }
-
-        int status = response.statusCode();
-        if (status == Response.Status.NOT_FOUND.getStatusCode()) {
+        if (response.status() == Response.Status.NOT_FOUND.getStatusCode()) {
+            // "Not tracked by Red Hat" is an answer, not a failure.
             return Optional.empty();
         }
-        if (status != Response.Status.OK.getStatusCode()) {
+        if (!response.isOk()) {
             throw new KnowledgeBaseException(
-                    "Could not look up " + normalized + ": the Security Data API returned HTTP " + status);
+                    "Could not look up " + normalized + ": the Security Data API returned HTTP "
+                            + response.status());
         }
 
-        try {
-            return Optional.of(objectMapper.readTree(response.body()));
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Received a malformed response from the Security Data API");
-        }
+        return Optional.of(http.readTree(response, API));
     }
 
     /**
@@ -114,16 +91,5 @@ public class SecurityDataClient {
                     "\"" + cveId.strip() + "\" is not a CVE identifier; expected the form CVE-2024-6387");
         }
         return candidate;
-    }
-
-    private static HttpResponse.BodyHandler<String> boundedBodyHandler() {
-        return info -> HttpResponse.BodySubscribers.mapping(
-                HttpResponse.BodySubscribers.ofByteArray(),
-                bytes -> {
-                    if (bytes.length > MAX_RESPONSE_BYTES) {
-                        throw new KnowledgeBaseException("Security Data response exceeded the size limit");
-                    }
-                    return new String(bytes, StandardCharsets.UTF_8);
-                });
     }
 }

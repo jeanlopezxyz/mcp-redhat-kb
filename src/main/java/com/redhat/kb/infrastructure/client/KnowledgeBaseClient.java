@@ -1,17 +1,10 @@
 package com.redhat.kb.infrastructure.client;
 
-import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
 import com.redhat.kb.infrastructure.dto.KnowledgeBaseSearchResponseDto;
@@ -20,7 +13,6 @@ import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.Response;
 
 import static com.redhat.kb.KnowledgeBaseConstants.DEFAULT_MAX_RESULTS;
 
@@ -32,29 +24,32 @@ import static com.redhat.kb.KnowledgeBaseConstants.DEFAULT_MAX_RESULTS;
 public class KnowledgeBaseClient {
 
     private static final String BEARER_PREFIX = "Bearer ";
-    private static final String HYDRA_BASE_URL = "https://access.redhat.com/hydra/rest/search/kcs";
 
     private static final String SEARCH_FIELDS = "id,title,abstract,documentKind,view_uri,product,lastModifiedDate";
     private static final String DETAIL_FIELDS = "id,title,abstract,documentKind,view_uri,product,issue," +
             "solution_environment,solution_rootcause,solution_resolution,solution_diagnosticsteps," +
             "lastModifiedDate";
 
-    /** Guards against an oversized response exhausting the heap. */
+    /** Most a response body may occupy; enforced while streaming, never after buffering. */
     private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-    private final RedHatApiConfig config;
+    /** How this API is bounded and named in failure messages the MCP client sees. */
+    private static final BoundedJsonHttp.ApiProfile API = new BoundedJsonHttp.ApiProfile(
+            MAX_RESPONSE_BYTES,
+            "Request to the Knowledge Base was interrupted",
+            "Could not reach the Red Hat Knowledge Base API",
+            "Knowledge Base response exceeded the size limit",
+            "Received a malformed response from the Knowledge Base API");
+
+    private final String baseUrl;
     private final RedHatAuthClient authClient;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final BoundedJsonHttp http;
 
     @Inject
-    public KnowledgeBaseClient(RedHatApiConfig config, RedHatAuthClient authClient, ObjectMapper objectMapper) {
-        this.config = config;
+    public KnowledgeBaseClient(RedHatApiConfig config, RedHatAuthClient authClient, BoundedJsonHttp http) {
+        this.baseUrl = config.urls().knowledgeBase();
         this.authClient = authClient;
-        this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(config.timeouts().connectSeconds()))
-                .build();
+        this.http = http;
     }
 
     // Note on caching: the credential is the first parameter of both cached methods, so
@@ -71,7 +66,7 @@ public class KnowledgeBaseClient {
     @CacheResult(cacheName = "kb-search")
     public SearchPage search(RedHatCredential credential, String query, int maxResults,
             String product, String documentType) {
-        StringBuilder urlBuilder = new StringBuilder(HYDRA_BASE_URL);
+        StringBuilder urlBuilder = new StringBuilder(baseUrl);
         urlBuilder.append("?q=").append(encode(SolrQuery.escape(query)));
         urlBuilder.append("&rows=").append(maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS);
         urlBuilder.append("&fl=").append(SEARCH_FIELDS);
@@ -100,7 +95,7 @@ public class KnowledgeBaseClient {
             throw new KnowledgeBaseException("Article ID must be numeric");
         }
 
-        String url = HYDRA_BASE_URL
+        String url = baseUrl
                 + "?q=" + encode("id:" + articleId)
                 + "&fl=" + DETAIL_FIELDS;
 
@@ -112,36 +107,18 @@ public class KnowledgeBaseClient {
      * exception whose message names the failure mode.
      */
     private KnowledgeBaseSearchResponseDto execute(RedHatCredential credential, String url, String action) {
-        HttpResponse<String> response;
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header(HttpHeaders.AUTHORIZATION, BEARER_PREFIX + authClient.getAccessToken(credential))
-                    .GET()
-                    .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
-                    .build();
+        // Resolved before the request so an SSO failure surfaces as its own
+        // AuthenticationException rather than as a Knowledge Base one.
+        String accessToken = authClient.getAccessToken(credential);
 
-            response = httpClient.send(request, boundedBodyHandler());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new KnowledgeBaseException("Request to the Knowledge Base was interrupted");
-        } catch (AuthenticationException e) {
-            // Already carries a client-safe message.
-            throw e;
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Could not reach the Red Hat Knowledge Base API");
+        BoundedJsonHttp.ApiResponse response = http.get(url, API,
+                HttpHeaders.AUTHORIZATION, BEARER_PREFIX + accessToken);
+
+        if (!response.isOk()) {
+            throw new KnowledgeBaseException(describeFailure(response.status(), action));
         }
 
-        int status = response.statusCode();
-        if (status != Response.Status.OK.getStatusCode()) {
-            throw new KnowledgeBaseException(describeFailure(status, action));
-        }
-
-        try {
-            return objectMapper.readValue(response.body(), KnowledgeBaseSearchResponseDto.class);
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Received a malformed response from the Knowledge Base API");
-        }
+        return http.readValue(response, KnowledgeBaseSearchResponseDto.class, API);
     }
 
     /**
@@ -159,20 +136,6 @@ public class KnowledgeBaseClient {
                     : "unexpected response";
         };
         return "Could not " + action + ": " + reason + " (HTTP " + status + ")";
-    }
-
-    /**
-     * Reads the body into a string while refusing responses beyond {@link #MAX_RESPONSE_BYTES}.
-     */
-    private static HttpResponse.BodyHandler<String> boundedBodyHandler() {
-        return info -> HttpResponse.BodySubscribers.mapping(
-                HttpResponse.BodySubscribers.ofByteArray(),
-                bytes -> {
-                    if (bytes.length > MAX_RESPONSE_BYTES) {
-                        throw new KnowledgeBaseException("Knowledge Base response exceeded the size limit");
-                    }
-                    return new String(bytes, StandardCharsets.UTF_8);
-                });
     }
 
     /**

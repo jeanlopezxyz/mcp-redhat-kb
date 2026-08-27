@@ -1,23 +1,15 @@
 package com.redhat.kb.infrastructure.client;
 
-import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
 
 import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.core.Response;
 
 /**
  * Client for the Red Hat Product Life Cycle API.
@@ -29,22 +21,24 @@ import jakarta.ws.rs.core.Response;
 @ApplicationScoped
 public class LifecycleClient {
 
-    private static final String BASE_URL = "https://access.redhat.com/product-life-cycles/api/v1/products";
-
-    /** Guards against an oversized response exhausting the heap. */
+    /** Most a response body may occupy; enforced while streaming, never after buffering. */
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
-    private final RedHatApiConfig config;
+    /** How this API is bounded and named in failure messages the MCP client sees. */
+    private static final BoundedJsonHttp.ApiProfile API = new BoundedJsonHttp.ApiProfile(
+            MAX_RESPONSE_BYTES,
+            "Request to the Product Life Cycle API was interrupted",
+            "Could not reach the Red Hat Product Life Cycle API",
+            "Life cycle response exceeded the size limit",
+            "Received a malformed response from the Product Life Cycle API");
+
+    private final String baseUrl;
+    private final BoundedJsonHttp http;
 
     @Inject
-    public LifecycleClient(RedHatApiConfig config, ObjectMapper objectMapper) {
-        this.config = config;
-        this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(config.timeouts().connectSeconds()))
-                .build();
+    public LifecycleClient(RedHatApiConfig config, BoundedJsonHttp http) {
+        this.baseUrl = config.urls().lifecycle();
+        this.http = http;
     }
 
     /**
@@ -58,48 +52,18 @@ public class LifecycleClient {
             throw new KnowledgeBaseException("A product name is required");
         }
 
-        String url = BASE_URL + "?name=" + URLEncoder.encode(productName.strip(), StandardCharsets.UTF_8);
+        String url = baseUrl + "?name=" + URLEncoder.encode(productName.strip(), StandardCharsets.UTF_8);
 
-        HttpResponse<String> response;
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Accept", "application/json")
-                    .GET()
-                    .timeout(Duration.ofSeconds(config.timeouts().requestSeconds()))
-                    .build();
+        BoundedJsonHttp.ApiResponse response = http.get(url, API, "Accept", "application/json");
 
-            response = httpClient.send(request, boundedBodyHandler());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new KnowledgeBaseException("Request to the Product Life Cycle API was interrupted");
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Could not reach the Red Hat Product Life Cycle API");
-        }
-
-        if (response.statusCode() != Response.Status.OK.getStatusCode()) {
+        if (!response.isOk()) {
             throw new KnowledgeBaseException(
-                    "Could not look up the life cycle: the API returned HTTP " + response.statusCode());
+                    "Could not look up the life cycle: the API returned HTTP " + response.status());
         }
 
-        try {
-            JsonNode data = objectMapper.readTree(response.body()).path("data");
-            return data.isArray() && !data.isEmpty()
-                    ? Optional.of(data.get(0))
-                    : Optional.empty();
-        } catch (IOException e) {
-            throw new KnowledgeBaseException("Received a malformed response from the Product Life Cycle API");
-        }
-    }
-
-    private static HttpResponse.BodyHandler<String> boundedBodyHandler() {
-        return info -> HttpResponse.BodySubscribers.mapping(
-                HttpResponse.BodySubscribers.ofByteArray(),
-                bytes -> {
-                    if (bytes.length > MAX_RESPONSE_BYTES) {
-                        throw new KnowledgeBaseException("Life cycle response exceeded the size limit");
-                    }
-                    return new String(bytes, StandardCharsets.UTF_8);
-                });
+        JsonNode data = http.readTree(response, API).path("data");
+        return data.isArray() && !data.isEmpty()
+                ? Optional.of(data.get(0))
+                : Optional.empty();
     }
 }

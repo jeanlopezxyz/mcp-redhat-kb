@@ -37,9 +37,27 @@ class UserTokenRequiredTest {
                     "redhat.api.offline-token", SHARED_TOKEN,
                     "redhat.api.require-user-token", "true",
                     "quarkus.oidc.enabled", "false",
-                    "quarkus.http.auth.permission.mcp.policy", "permit");
+                    "quarkus.http.auth.permission.mcp.policy", "permit",
+                    // Pointed at an unroutable address so the suite stays offline. These
+                    // tests assert where a call stops (at credential resolution or past
+                    // it), never what Red Hat answers, so a connection that cannot be
+                    // established serves them exactly as well as the real endpoint --
+                    // while keeping placeholder tokens off sso.redhat.com and the suite
+                    // green without a network.
+                    "redhat.api.sso.token-url", UNROUTABLE_URL,
+                    "redhat.api.urls.knowledge-base", UNROUTABLE_URL,
+                    // Failing fast keeps the no-network path from waiting on the default
+                    // 30s connect timeout for every call.
+                    "redhat.api.timeouts.connect-seconds", "1",
+                    "redhat.api.timeouts.request-seconds", "1");
         }
     }
+
+    /**
+     * TEST-NET-1 (RFC 5737) is reserved for documentation and is not routable, so a
+     * request to it fails locally instead of reaching any real host.
+     */
+    private static final String UNROUTABLE_URL = "http://192.0.2.1:9";
 
     private static String search(McpStreamableTestClient client) {
         StringBuilder captured = new StringBuilder();
