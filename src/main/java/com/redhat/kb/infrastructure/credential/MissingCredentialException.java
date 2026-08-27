@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
 
 /**
  * Raised when no Red Hat credential is available for the current request.

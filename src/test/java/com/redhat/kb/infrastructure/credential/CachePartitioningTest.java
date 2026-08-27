@@ -1,9 +1,9 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
 
 import java.util.List;
 import java.util.Optional;
 
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseArticle;
 
 import io.quarkus.cache.Cache;
 import io.quarkus.cache.CacheName;
@@ -54,8 +54,8 @@ class CachePartitioningTest {
      * Populates the cache the way the client does, without any network call: the supplier
      * stands in for the Hydra response.
      */
-    private List<KnowledgeBaseArticleDto> cacheSearch(RedHatCredential credential, String query, String marker) {
-        KnowledgeBaseArticleDto article = new KnowledgeBaseArticleDto();
+    private List<KnowledgeBaseArticle> cacheSearch(RedHatCredential credential, String query, String marker) {
+        KnowledgeBaseArticle article = new KnowledgeBaseArticle();
         article.setId(marker);
         return searchCache
                 .get(new CompositeKey(credential, query, 10, "", ""), key -> List.of(article))
@@ -71,8 +71,8 @@ class CachePartitioningTest {
     @DisplayName("keeps one credential's search results out of another's")
     void searchResultsAreIsolatedPerCredential() {
         // Same query, two subscribers: each must get back what was cached for them.
-        List<KnowledgeBaseArticleDto> forAlice = cacheSearch(ALICE, "crashloop", "alice-result");
-        List<KnowledgeBaseArticleDto> forBob = cacheSearch(BOB, "crashloop", "bob-result");
+        List<KnowledgeBaseArticle> forAlice = cacheSearch(ALICE, "crashloop", "alice-result");
+        List<KnowledgeBaseArticle> forBob = cacheSearch(BOB, "crashloop", "bob-result");
 
         assertEquals("alice-result", forAlice.get(0).getId());
         assertEquals("bob-result", forBob.get(0).getId(),
@@ -85,7 +85,7 @@ class CachePartitioningTest {
         cacheSearch(ALICE, "etcd timeout", "first-call");
         // A second call with a different marker must still return the cached entry,
         // proving the key matched rather than a fresh lookup being made.
-        List<KnowledgeBaseArticleDto> second = cacheSearch(ALICE, "etcd timeout", "second-call");
+        List<KnowledgeBaseArticle> second = cacheSearch(ALICE, "etcd timeout", "second-call");
 
         assertEquals("first-call", second.get(0).getId());
     }
@@ -94,7 +94,7 @@ class CachePartitioningTest {
     @DisplayName("treats a different query as a different entry")
     void differentQueriesAreSeparateEntries() {
         cacheSearch(ALICE, "query-one", "result-one");
-        List<KnowledgeBaseArticleDto> other = cacheSearch(ALICE, "query-two", "result-two");
+        List<KnowledgeBaseArticle> other = cacheSearch(ALICE, "query-two", "result-two");
 
         assertEquals("result-two", other.get(0).getId());
     }

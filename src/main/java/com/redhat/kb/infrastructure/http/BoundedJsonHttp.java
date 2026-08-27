@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.http;
 
 import java.io.IOException;
 import java.io.InputStream;

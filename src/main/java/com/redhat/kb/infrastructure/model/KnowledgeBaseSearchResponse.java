@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.dto;
+package com.redhat.kb.infrastructure.model;
 
 import java.util.List;
 
@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * DTO for Red Hat Knowledge Base search response (Hydra API).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class KnowledgeBaseSearchResponseDto {
+public class KnowledgeBaseSearchResponse {
 
     @JsonProperty("response")
     private Response response;
@@ -28,7 +28,7 @@ public class KnowledgeBaseSearchResponseDto {
         private int numFound;
 
         @JsonProperty("docs")
-        private List<KnowledgeBaseArticleDto> docs;
+        private List<KnowledgeBaseArticle> docs;
 
         public int getNumFound() {
             return numFound;
@@ -38,11 +38,11 @@ public class KnowledgeBaseSearchResponseDto {
             this.numFound = numFound;
         }
 
-        public List<KnowledgeBaseArticleDto> getDocs() {
+        public List<KnowledgeBaseArticle> getDocs() {
             return docs;
         }
 
-        public void setDocs(List<KnowledgeBaseArticleDto> docs) {
+        public void setDocs(List<KnowledgeBaseArticle> docs) {
             this.docs = docs;
         }
     }

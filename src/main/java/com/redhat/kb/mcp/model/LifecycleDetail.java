@@ -1,4 +1,4 @@
-package com.redhat.kb.mcp;
+package com.redhat.kb.mcp.model;
 
 import java.util.List;
 

@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

@@ -1,4 +1,6 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
+
+import com.redhat.kb.infrastructure.client.KnowledgeBaseClient;
 
 import java.lang.reflect.Method;
 

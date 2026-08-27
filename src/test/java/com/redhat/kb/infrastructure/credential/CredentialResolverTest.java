@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
 
 import java.util.Optional;
 

@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.dto;
+package com.redhat.kb.infrastructure.model;
 
 import java.util.List;
 
@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The Hydra API types the solution_* fields loosely: they arrive either as an array of
  * strings or as the bare string "subscriber_only".
  */
-class KnowledgeBaseArticleDtoTest {
+class KnowledgeBaseArticleTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -27,7 +27,7 @@ class KnowledgeBaseArticleDtoTest {
                 {"id":"5049001","title":"Pod stuck","solution_resolution":["step one","step two"]}
                 """;
 
-        KnowledgeBaseArticleDto dto = mapper.readValue(json, KnowledgeBaseArticleDto.class);
+        KnowledgeBaseArticle dto = mapper.readValue(json, KnowledgeBaseArticle.class);
 
         assertEquals("5049001", dto.getId());
         assertEquals(List.of("step one", "step two"), dto.getSolutionResolution());
@@ -40,7 +40,7 @@ class KnowledgeBaseArticleDtoTest {
                 {"id":"1","solution_resolution":"subscriber_only","solution_rootcause":"subscriber_only"}
                 """;
 
-        KnowledgeBaseArticleDto dto = mapper.readValue(json, KnowledgeBaseArticleDto.class);
+        KnowledgeBaseArticle dto = mapper.readValue(json, KnowledgeBaseArticle.class);
 
         assertNull(dto.getSolutionResolution());
         assertNull(dto.getSolutionRootcause());
@@ -52,8 +52,8 @@ class KnowledgeBaseArticleDtoTest {
     void absentFieldIsNotSubscriberOnly() throws Exception {
         // Both leave getSolutionResolution() null, so only the flag tells them apart — and
         // the difference decides whether a token would help.
-        KnowledgeBaseArticleDto dto = mapper.readValue(
-                "{\"id\":\"1\",\"title\":\"No solution section\"}", KnowledgeBaseArticleDto.class);
+        KnowledgeBaseArticle dto = mapper.readValue(
+                "{\"id\":\"1\",\"title\":\"No solution section\"}", KnowledgeBaseArticle.class);
 
         assertNull(dto.getSolutionResolution());
         assertFalse(dto.isSubscriberOnly());
@@ -62,8 +62,8 @@ class KnowledgeBaseArticleDtoTest {
     @Test
     @DisplayName("wraps a plain string solution field into a single-element list")
     void wrapsPlainString() throws Exception {
-        KnowledgeBaseArticleDto dto = mapper.readValue(
-                "{\"id\":\"1\",\"solution_resolution\":\"just restart it\"}", KnowledgeBaseArticleDto.class);
+        KnowledgeBaseArticle dto = mapper.readValue(
+                "{\"id\":\"1\",\"solution_resolution\":\"just restart it\"}", KnowledgeBaseArticle.class);
 
         assertEquals(List.of("just restart it"), dto.getSolutionResolution());
     }
@@ -71,8 +71,8 @@ class KnowledgeBaseArticleDtoTest {
     @Test
     @DisplayName("ignores unknown fields returned by the API")
     void ignoresUnknownFields() throws Exception {
-        KnowledgeBaseArticleDto dto = mapper.readValue(
-                "{\"id\":\"1\",\"brandNewField\":\"whatever\"}", KnowledgeBaseArticleDto.class);
+        KnowledgeBaseArticle dto = mapper.readValue(
+                "{\"id\":\"1\",\"brandNewField\":\"whatever\"}", KnowledgeBaseArticle.class);
 
         assertEquals("1", dto.getId());
     }
@@ -80,8 +80,8 @@ class KnowledgeBaseArticleDtoTest {
     @Test
     @DisplayName("tolerates a search response whose docs array is absent")
     void tolerantOfMissingDocs() throws Exception {
-        KnowledgeBaseSearchResponseDto response = mapper.readValue(
-                "{\"response\":{\"numFound\":0}}", KnowledgeBaseSearchResponseDto.class);
+        KnowledgeBaseSearchResponse response = mapper.readValue(
+                "{\"response\":{\"numFound\":0}}", KnowledgeBaseSearchResponse.class);
 
         assertNotNull(response.getResponse());
         assertNull(response.getResponse().getDocs());
@@ -94,7 +94,7 @@ class KnowledgeBaseArticleDtoTest {
                 {"response":{"numFound":1,"docs":[{"id":"5049001","title":"Pod stuck"}]}}
                 """;
 
-        KnowledgeBaseSearchResponseDto response = mapper.readValue(json, KnowledgeBaseSearchResponseDto.class);
+        KnowledgeBaseSearchResponse response = mapper.readValue(json, KnowledgeBaseSearchResponse.class);
 
         assertEquals(1, response.getResponse().getNumFound());
         assertTrue(response.getResponse().getDocs().size() == 1);

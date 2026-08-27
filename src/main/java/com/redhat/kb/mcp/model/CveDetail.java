@@ -1,4 +1,4 @@
-package com.redhat.kb.mcp;
+package com.redhat.kb.mcp.model;
 
 import java.util.List;
 
@@ -30,7 +30,7 @@ public record CveDetail(
      * <p>A tool that declares an output schema must return structured content on every
      * success, so "not found" carries this rather than text alone.
      */
-    static CveDetail notFound(String cveId) {
+    public static CveDetail notFound(String cveId) {
         return new CveDetail(cveId, "", "", "", List.of(), List.of(), "", "");
     }
 

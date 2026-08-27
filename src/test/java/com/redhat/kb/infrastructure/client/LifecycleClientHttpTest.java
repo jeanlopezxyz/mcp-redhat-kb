@@ -1,5 +1,8 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;

@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.dto;
+package com.redhat.kb.infrastructure.model;
 
 import java.util.List;
 
@@ -20,7 +20,7 @@ import com.fasterxml.jackson.annotation.JsonSetter;
  * a valid Red Hat token.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class KnowledgeBaseArticleDto {
+public class KnowledgeBaseArticle {
 
     /** Sentinel Hydra returns in place of solution content the credential cannot read. */
     private static final String SUBSCRIBER_ONLY = "subscriber_only";

@@ -1,5 +1,11 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.credential.RedHatAuthClient;
+import com.redhat.kb.infrastructure.credential.RedHatCredential;
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+import com.redhat.kb.infrastructure.model.SearchPage;
+
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;

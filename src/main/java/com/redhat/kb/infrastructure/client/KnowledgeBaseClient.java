@@ -1,5 +1,12 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.credential.AuthenticationException;
+import com.redhat.kb.infrastructure.credential.RedHatAuthClient;
+import com.redhat.kb.infrastructure.credential.RedHatCredential;
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+import com.redhat.kb.infrastructure.model.SearchPage;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
@@ -7,8 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseSearchResponseDto;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseArticle;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseSearchResponse;
 
 import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -84,7 +91,7 @@ public class KnowledgeBaseClient {
             urlBuilder.append("&fq=documentKind:").append(encode("\"" + SolrQuery.escape(documentType) + "\""));
         }
 
-        KnowledgeBaseSearchResponseDto response =
+        KnowledgeBaseSearchResponse response =
                 execute(credential, urlBuilder.toString(), "search the Knowledge Base");
 
         return new SearchPage(extractDocs(response), extractTotal(response));
@@ -94,7 +101,7 @@ public class KnowledgeBaseClient {
      * Gets the full details of an article by its ID.
      */
     @CacheResult(cacheName = "kb-article")
-    public Optional<KnowledgeBaseArticleDto> getArticle(RedHatCredential credential, String articleId) {
+    public Optional<KnowledgeBaseArticle> getArticle(RedHatCredential credential, String articleId) {
         if (!SolrQuery.isValidArticleId(articleId)) {
             throw new KnowledgeBaseException(
                     "Article ID must be numeric (e.g. 7136675) or an advisory (e.g. RHSA-2026:6565)");
@@ -131,7 +138,7 @@ public class KnowledgeBaseClient {
      * title: the alternative is returning whichever one Hydra listed first, which for
      * id 33098 is an empty Certification stub.
      */
-    private static int readableContent(KnowledgeBaseArticleDto article) {
+    private static int readableContent(KnowledgeBaseArticle article) {
         int score = 0;
         if (article.getSolutionResolution() != null) {
             score += 4;
@@ -149,7 +156,7 @@ public class KnowledgeBaseClient {
      * Issues the request and deserializes the response, mapping failures to a typed
      * exception whose message names the failure mode.
      */
-    private KnowledgeBaseSearchResponseDto execute(RedHatCredential credential, String url, String action) {
+    private KnowledgeBaseSearchResponse execute(RedHatCredential credential, String url, String action) {
         // Resolved before the request so an SSO failure surfaces as its own
         // AuthenticationException rather than as a Knowledge Base one.
         String accessToken = authClient.getAccessToken(credential);
@@ -161,7 +168,7 @@ public class KnowledgeBaseClient {
             throw new KnowledgeBaseException(describeFailure(response.status(), action));
         }
 
-        return http.readValue(response, KnowledgeBaseSearchResponseDto.class, API);
+        return http.readValue(response, KnowledgeBaseSearchResponse.class, API);
     }
 
     /**
@@ -184,20 +191,20 @@ public class KnowledgeBaseClient {
     /**
      * Extracts the document list, tolerating a response that omits {@code response} or {@code docs}.
      */
-    private static List<KnowledgeBaseArticleDto> extractDocs(KnowledgeBaseSearchResponseDto response) {
+    private static List<KnowledgeBaseArticle> extractDocs(KnowledgeBaseSearchResponse response) {
         return Optional.ofNullable(response)
-                .map(KnowledgeBaseSearchResponseDto::getResponse)
-                .map(KnowledgeBaseSearchResponseDto.Response::getDocs)
+                .map(KnowledgeBaseSearchResponse::getResponse)
+                .map(KnowledgeBaseSearchResponse.Response::getDocs)
                 .orElseGet(List::of);
     }
 
     /**
      * How many documents matched, which is usually far more than one page holds.
      */
-    private static int extractTotal(KnowledgeBaseSearchResponseDto response) {
+    private static int extractTotal(KnowledgeBaseSearchResponse response) {
         return Optional.ofNullable(response)
-                .map(KnowledgeBaseSearchResponseDto::getResponse)
-                .map(KnowledgeBaseSearchResponseDto.Response::getNumFound)
+                .map(KnowledgeBaseSearchResponse::getResponse)
+                .map(KnowledgeBaseSearchResponse.Response::getNumFound)
                 .orElse(0);
     }
 

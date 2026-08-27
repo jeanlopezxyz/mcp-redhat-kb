@@ -1,5 +1,8 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.CveDetail;
+import com.redhat.kb.mcp.model.LifecycleDetail;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

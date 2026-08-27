@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.http;
 
 /**
  * Raised when a Knowledge Base (Hydra API) call fails.

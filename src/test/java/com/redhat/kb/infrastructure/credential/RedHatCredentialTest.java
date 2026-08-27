@@ -1,4 +1,4 @@
-package com.redhat.kb.infrastructure.client;
+package com.redhat.kb.infrastructure.credential;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

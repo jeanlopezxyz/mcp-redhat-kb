@@ -1,12 +1,15 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.ArticleDetail;
+import com.redhat.kb.mcp.model.SearchResult;
+
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.redhat.kb.infrastructure.client.SearchPage;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.model.SearchPage;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseArticle;
 
 import static com.redhat.kb.KnowledgeBaseConstants.ARTICLE_BASE_URL;
 import static com.redhat.kb.KnowledgeBaseConstants.MAX_ARTICLE_CHARS;
@@ -108,7 +111,7 @@ final class ArticleFormatter {
      * Builds the structured payload for a single article. Sections are capped individually
      * and the article as a whole, so an oversized upstream body cannot flood the context.
      */
-    static ArticleDetail toArticleDetail(KnowledgeBaseArticleDto article) {
+    static ArticleDetail toArticleDetail(KnowledgeBaseArticle article) {
         // Ordered so the whole-article budget is spent on the most useful sections first:
         // a reader needs the resolution far more often than the diagnostic transcript.
         Map<String, List<String>> sections = new LinkedHashMap<>();
@@ -231,7 +234,7 @@ final class ArticleFormatter {
      * the API is only echoed when it is an HTTPS redhat.com address, so a tampered record
      * cannot present an arbitrary link to the model as official.
      */
-    private static String safeUrl(KnowledgeBaseArticleDto article) {
+    private static String safeUrl(KnowledgeBaseArticle article) {
         String viewUri = article.getViewUri();
         if (viewUri != null && !viewUri.isBlank()) {
             try {

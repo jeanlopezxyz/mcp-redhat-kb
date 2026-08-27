@@ -1,11 +1,15 @@
 package com.redhat.kb.mcp;
 
-import com.redhat.kb.application.service.KnowledgeBaseService;
-import com.redhat.kb.infrastructure.client.AuthenticationException;
-import com.redhat.kb.infrastructure.client.KnowledgeBaseException;
-import com.redhat.kb.infrastructure.client.MissingCredentialException;
-import com.redhat.kb.infrastructure.client.RedHatCredential;
-import com.redhat.kb.infrastructure.client.SearchPage;
+import com.redhat.kb.mcp.model.ArticleDetail;
+import com.redhat.kb.mcp.model.SearchResult;
+
+import com.redhat.kb.infrastructure.credential.AuthenticationException;
+import com.redhat.kb.infrastructure.credential.CredentialResolver;
+import com.redhat.kb.infrastructure.client.KnowledgeBaseClient;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+import com.redhat.kb.infrastructure.credential.MissingCredentialException;
+import com.redhat.kb.infrastructure.credential.RedHatCredential;
+import com.redhat.kb.infrastructure.model.SearchPage;
 
 import io.quarkiverse.mcp.server.MetaKey;
 import io.quarkiverse.mcp.server.TextContent;
@@ -39,7 +43,10 @@ public class KnowledgeBaseTools {
     private static final Logger LOG = Logger.getLogger(KnowledgeBaseTools.class);
 
     @Inject
-    KnowledgeBaseService kbService;
+    KnowledgeBaseClient knowledgeBase;
+
+    @Inject
+    CredentialResolver credentials;
 
     @Inject
     ToolAuditLog audit;
@@ -94,14 +101,14 @@ public class KnowledgeBaseTools {
         }
 
         try {
-            RedHatCredential credential = kbService.currentCredential();
+            RedHatCredential credential = credentials.resolve();
             Optional<ToolResponse> throttled = enforceRateLimit("searchKnowledgeBase", credential);
             if (throttled.isPresent()) {
                 return throttled.get();
             }
             audit.record("searchKnowledgeBase", query, credential.fingerprint());
 
-            SearchPage page = kbService.search(
+            SearchPage page = knowledgeBase.search(
                     credential,
                     query.strip(),
                     clampMaxResults(maxResults),
@@ -160,14 +167,14 @@ public class KnowledgeBaseTools {
         }
 
         try {
-            RedHatCredential credential = kbService.currentCredential();
+            RedHatCredential credential = credentials.resolve();
             Optional<ToolResponse> throttled = enforceRateLimit("getArticle", credential);
             if (throttled.isPresent()) {
                 return throttled.get();
             }
             audit.record("getArticle", articleId, credential.fingerprint());
 
-            return kbService.getArticle(credential, articleId.strip())
+            return knowledgeBase.getArticle(credential, articleId.strip())
                     .map(article -> {
                         ArticleDetail structured = ArticleFormatter.toArticleDetail(article);
                         return new ToolResponse(

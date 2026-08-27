@@ -1,11 +1,14 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.CveDetail;
+import com.redhat.kb.mcp.model.LifecycleDetail;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.redhat.kb.infrastructure.client.KnowledgeBaseException;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.client.LifecycleClient;
 import com.redhat.kb.infrastructure.client.SecurityDataClient;
 

@@ -1,5 +1,8 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.CveDetail;
+import com.redhat.kb.mcp.model.LifecycleDetail;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
