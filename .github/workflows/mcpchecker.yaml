@@ -61,15 +61,46 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == "issue_comment" ]]; then
             PERMISSION=$(gh api "repos/$REPO/collaborators/$COMMENT_USER/permission" --jq '.permission')
-            if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "write" ]]; then
-              echo "should-run=true" >> $GITHUB_OUTPUT
-              echo "is-pr=true" >> $GITHUB_OUTPUT
-              PR_SHA=$(gh pr view "$ISSUE_NUMBER" --repo "$REPO" --json headRefOid --jq '.headRefOid')
-              echo "pr-sha=$PR_SHA" >> $GITHUB_OUTPUT
-            else
+            if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" ]]; then
+              echo "::warning::@$COMMENT_USER does not have write access; ignoring /run-mcpchecker"
               echo "should-run=false" >> $GITHUB_OUTPUT
+              exit 0
             fi
+
+            # One API call for everything we need about the PR. The head SHA is
+            # captured HERE, before any human approval, and the evaluation job checks
+            # out exactly this SHA — commits pushed after the label/approval do not
+            # sneak into the run.
+            PR_JSON=$(gh pr view "$ISSUE_NUMBER" --repo "$REPO" \
+              --json headRefOid,isCrossRepository,labels)
+            PR_SHA=$(jq -r '.headRefOid' <<<"$PR_JSON")
+            IS_FORK=$(jq -r '.isCrossRepository' <<<"$PR_JSON")
+            HAS_LABEL=$(jq -r '.labels | map(.name) | contains(["safe-to-eval"])' <<<"$PR_JSON")
+
+            # The evaluation job builds and RUNS the PR's code (mvnw, pom.xml, Maven
+            # plugins) with production secrets in the environment. "Someone with write
+            # commented /run-mcpchecker" is not the same statement as "a maintainer
+            # reviewed THIS diff and considers it safe to execute" — the label makes
+            # the second statement explicit, and for fork PRs (fully attacker-authored
+            # code) it is non-negotiable. The label can be re-applied after new pushes;
+            # combined with the pinned SHA above and the environment approval on the
+            # run-evaluation job, a stale label cannot execute unreviewed code alone.
+            if [[ "$HAS_LABEL" != "true" ]]; then
+              echo "::warning::PR #$ISSUE_NUMBER lacks the 'safe-to-eval' label (fork: $IS_FORK). A maintainer must review the diff and apply the label before /run-mcpchecker runs."
+              echo "should-run=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [[ "$IS_FORK" == "true" ]]; then
+              echo "::notice::PR #$ISSUE_NUMBER comes from a fork; evaluation requires environment approval before secrets are exposed."
+            fi
+
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "is-pr=true" >> $GITHUB_OUTPUT
+            echo "pr-sha=$PR_SHA" >> $GITHUB_OUTPUT
           else
+            # schedule / workflow_dispatch run already-merged code from the default
+            # branch: no label, no approval — they must stay frictionless.
             echo "should-run=true" >> $GITHUB_OUTPUT
             echo "is-pr=false" >> $GITHUB_OUTPUT
             echo "pr-sha=$SHA" >> $GITHUB_OUTPUT
@@ -81,6 +112,26 @@ jobs:
     if: needs.check-trigger.outputs.should-run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # PR-triggered runs execute code from the PR head (mvnw, pom.xml, Maven plugins
+    # all run arbitrary code at build time) with REDHAT_TOKEN / MODEL_KEY /
+    # JUDGE_API_KEY in scope. The 'mcp-eval' environment forces a human to approve
+    # the run in the Actions UI *after* seeing which SHA will execute — this is the
+    # hard gate; the label check upstream is only a review convention.
+    #
+    # MANUAL SETUP REQUIRED (Settings > Environments > mcp-eval):
+    #   1. Create the environment 'mcp-eval'.
+    #   2. Add the protection rule "Required reviewers" with the maintainers.
+    # Secrets stay at repository level ON PURPOSE: the schedule/workflow_dispatch
+    # path runs without an environment and still needs them. The protection works
+    # anyway because a job bound to a reviewed environment does not START (no
+    # checkout, no build, no secret injection) until a reviewer approves it.
+    # If the environment does not exist, GitHub auto-creates it WITHOUT reviewers on
+    # first use and the protection is nominal — this comment exists so that state is
+    # recognized as a misconfiguration, not as "working".
+    #
+    # schedule / workflow_dispatch run already-merged code, so they resolve to the
+    # empty string, which GitHub treats as "no environment": no approval friction.
+    environment: ${{ needs.check-trigger.outputs.is-pr == 'true' && 'mcp-eval' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -106,10 +157,53 @@ jobs:
 
       - name: Start MCP server
         run: |
-          # Start server in SSE mode on port 9081
-          java -jar target/quarkus-app/quarkus-run.jar &
-          # Wait for server to be ready
-          timeout 30 bash -c 'until curl -sf http://localhost:9081/q/health/ready; do sleep 1; done'
+          # Streamable HTTP transport on /mcp (port 9081).
+          java -jar target/quarkus-app/quarkus-run.jar > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+
+          # Readiness is probed against the real /mcp endpoint rather than
+          # /q/health/ready: quarkus-smallrye-health is NOT a dependency of this
+          # project, so that endpoint 404s, the `until` loop never succeeded and the
+          # wait silently burned its full timeout on every run.
+          #
+          # The probe asserts that /mcp ANSWERS, not that the call succeeds. An
+          # unauthenticated POST is refused by the `mcp` permission policy (403, or
+          # 401 with OIDC enabled) and that is a perfectly good readiness signal: it
+          # proves the HTTP transport is up and routing, which is what mcpchecker
+          # needs next. Requiring 200 would instead pin this probe to the auth
+          # posture and break the moment it changes -- McpAuthenticationTest is what
+          # guards the refusal itself.
+          #
+          # A plain `until` swallows the failure mode, so the loop ends in an explicit
+          # exit 1 with the server log: a server that dies at startup must fail this
+          # step loudly instead of leaving mcpchecker to report confusing tool errors.
+          for i in $(seq 1 30); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::MCP server process died during startup"
+              cat server.log
+              exit 1
+            fi
+
+            # %{http_code} with -o /dev/null: any HTTP status means the port is
+            # serving. curl exits non-zero only when it cannot connect at all.
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              -X POST http://localhost:9081/mcp \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-readiness","version":"1"}}}' \
+              2>/dev/null) || STATUS=000
+
+            if [[ "$STATUS" != "000" ]]; then
+              echo "MCP server ready after ${i}s (/mcp answered HTTP $STATUS)"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::MCP server did not answer on /mcp within 30s"
+          cat server.log
+          exit 1
         env:
           REDHAT_TOKEN: ${{ secrets.REDHAT_TOKEN }}
 
@@ -163,9 +257,21 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mcpchecker-results
-          path: mcpchecker-results.json
+          # The server log ships too: when a run fails at startup or mid-evaluation,
+          # it is the only record of why.
+          path: |
+            mcpchecker-results.json
+            server.log
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Cleanup
         if: always()
-        run: pkill -f quarkus-run.jar || true
+        run: |
+          # Kill the PID captured at startup; the pkill pattern is a fallback for the
+          # case where the readiness step failed before exporting it.
+          if [[ -n "${SERVER_PID:-}" ]]; then
+            kill "$SERVER_PID" 2>/dev/null || true
+          else
+            pkill -f quarkus-run.jar || true
+          fi

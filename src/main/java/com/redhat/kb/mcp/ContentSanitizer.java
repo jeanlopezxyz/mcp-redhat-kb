@@ -18,11 +18,22 @@ import static com.redhat.kb.KnowledgeBaseConstants.TRUNCATION_MARKER;
 final class ContentSanitizer {
 
     /**
-     * Matches the structural separators emitted by the formatters. Content that reproduces
-     * them at the start of a line is indented so it cannot be mistaken for a real section
-     * boundary by the model.
+     * Matches the structural separators emitted by the formatters at any position of a
+     * line, not just its start: entity-encoded HTML (&amp;lt;&amp;lt;&amp;lt;) only becomes
+     * a literal marker after Jsoup decodes it, and by then it can sit mid-line where a
+     * line-anchored pattern never looks. A space is inserted in front so the marker is
+     * displaced without destroying the surrounding text.
      */
-    private static final Pattern STRUCTURAL_MARKER = Pattern.compile("(?m)^(\\s*)(---|===|<<<)");
+    private static final Pattern STRUCTURAL_MARKER = Pattern.compile("(---|===|<<<)");
+
+    /**
+     * Matches a reproduced fence label wherever it appears. Displacing it is not enough —
+     * mid-line it would still read as a fence — so the bracket run is split apart, which
+     * leaves the text legible but no longer parseable as a marker. The nonce in
+     * {@link UntrustedFence} is the real guarantee; this is defense in depth.
+     */
+    private static final Pattern FENCE_LABEL =
+            Pattern.compile("<<<\\s*((?:END_)?UNTRUSTED_KB_CONTENT)");
 
     private static final Pattern EXCESS_BLANK_LINES = Pattern.compile("\n{3,}");
 
@@ -44,7 +55,10 @@ final class ContentSanitizer {
         // and drops tags without introducing markup of its own.
         String text = Jsoup.parse(raw, "", Parser.htmlParser()).wholeText();
 
-        text = STRUCTURAL_MARKER.matcher(text).replaceAll("$1 $2");
+        // Fence labels first: once split they no longer contain "<<<", so the generic
+        // marker rule does not touch them a second time.
+        text = FENCE_LABEL.matcher(text).replaceAll("<< < $1");
+        text = STRUCTURAL_MARKER.matcher(text).replaceAll(" $1");
         text = EXCESS_BLANK_LINES.matcher(text).replaceAll("\n\n");
         // Non-breaking spaces survive entity decoding and would otherwise reach the
         // model as opaque characters.

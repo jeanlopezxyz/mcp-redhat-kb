@@ -67,32 +67,46 @@ final class SecurityFormatter {
         sb.append('\n');
         sb.append("URL: ").append(cve.url()).append("\n");
 
+        // Everything below the header comes from the Security Data API: descriptions and
+        // mitigations are free text an upstream compromise could abuse, so they get the
+        // same nonce fence as Knowledge Base articles. The section headings render inside
+        // the fence because they only label that remote content.
+        StringBuilder body = new StringBuilder();
         if (!cve.description().isEmpty()) {
-            sb.append("\n").append(cve.description()).append('\n');
+            body.append(cve.description()).append('\n');
         }
 
         if (!cve.fixedReleases().isEmpty()) {
-            sb.append("\n--- Fixed in ---\n");
+            body.append("\n--- Fixed in ---\n");
             for (CveDetail.AffectedRelease r : cve.fixedReleases()) {
-                sb.append("  ").append(r.product());
+                body.append("  ").append(r.product());
                 if (!r.advisory().isEmpty()) {
-                    sb.append(" -> ").append(r.advisory());
+                    body.append(" -> ").append(r.advisory());
                 }
-                sb.append('\n');
+                body.append('\n');
             }
         }
 
         if (!cve.unfixedProducts().isEmpty()) {
-            sb.append("\n--- Not yet fixed ---\n");
+            body.append("\n--- Not yet fixed ---\n");
             for (CveDetail.PackageState s : cve.unfixedProducts()) {
-                sb.append("  ").append(s.product()).append(": ").append(s.state()).append('\n');
+                body.append("  ").append(s.product()).append(": ").append(s.state()).append('\n');
             }
         }
 
         if (!cve.mitigation().isEmpty()) {
-            sb.append("\n--- Mitigation ---\n").append(cve.mitigation()).append('\n');
+            body.append("\n--- Mitigation ---\n").append(cve.mitigation()).append('\n');
         }
 
+        if (!body.isEmpty()) {
+            UntrustedFence fence = UntrustedFence.newFence();
+            sb.append('\n').append(fence.open()).append('\n');
+            sb.append(body);
+            sb.append(fence.close()).append('\n');
+        }
+
+        // Our own conclusion, not upstream data: it must stay outside the fence or the
+        // model treats it as content it was told never to act on.
         if (cve.fixedReleases().isEmpty() && cve.unfixedProducts().isEmpty()) {
             sb.append("\nNo Red Hat product is listed as affected.\n");
         }
