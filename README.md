@@ -133,8 +133,21 @@ extensions:
 
 ### Docker
 
+The image ships with `MCP_REQUIRE_USER_TOKEN=true`, so every caller supplies its own
+token in the `X-Red-Hat-Token` header and a shared `REDHAT_TOKEN` is ignored:
+
 ```bash
-docker run -e REDHAT_TOKEN="your-token" ghcr.io/jeanlopezxyz/mcp-redhat-kb:latest
+docker run -p 9081:9081 ghcr.io/jeanlopezxyz/mcp-redhat-kb:latest
+```
+
+To serve every caller with one shared token instead — only for a single-user setup, since
+it lends your entitlements to anyone who reaches the port — turn the requirement off:
+
+```bash
+docker run -p 9081:9081 \
+  -e MCP_REQUIRE_USER_TOKEN=false \
+  -e REDHAT_TOKEN="your-token" \
+  ghcr.io/jeanlopezxyz/mcp-redhat-kb:latest
 ```
 
 ### HTTP Mode
@@ -169,7 +182,7 @@ reverse proxy that authenticates, a NetworkPolicy — controls who can reach the
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `REDHAT_TOKEN` | Shared Red Hat offline token; fallback for callers who send none | Unless per-user |
-| `MCP_REQUIRE_USER_TOKEN` | Require each caller's own token in `X-Red-Hat-Token`; HTTP only (default `false`) | Multi-user |
+| `MCP_REQUIRE_USER_TOKEN` | Require each caller's own token in `X-Red-Hat-Token`; HTTP only (default `false`, but `true` in the container image) | Multi-user |
 | `MCP_OIDC_ENABLED` | Require OAuth 2.1 bearer tokens (default `false`) | HTTP mode |
 | `KEYCLOAK_URL` | Keycloak base URL, e.g. `https://sso.example.com` | If OIDC on |
 | `KEYCLOAK_REALM` | Realm name (default `mcp`) | If OIDC on |
@@ -290,7 +303,7 @@ Two distinct failure modes, easy to confuse:
 - **No token at all** — the SSO exchange fails before the API is reached, and the tool
   returns an error. The server never issues an unauthenticated request.
 - **A valid token without the entitlement** — HTTP 200, but solution fields arrive as the
-  string `subscriber_only`. `KnowledgeBaseArticleDto` maps them to `null` *and* records
+  string `subscriber_only`. `KnowledgeBaseArticle` maps them to `null` *and* records
   `isSubscriberOnly()`, so "withheld" stays distinguishable from "this article has no such
   section" — without that flag both are just `null`, and a model reading a detailed problem
   with no resolution would reasonably conclude no fix exists.
