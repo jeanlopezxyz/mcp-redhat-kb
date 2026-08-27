@@ -7,7 +7,13 @@
 #   docker build -t mcp-redhat-kb .
 #
 # Run:
-#   docker run -i --rm -p 9081:9081 -e REDHAT_TOKEN=xxx mcp-redhat-kb
+#   docker run -i --rm -p 127.0.0.1:9081:9081 -e REDHAT_TOKEN=xxx mcp-redhat-kb
+#
+# The port is published on loopback deliberately. This image binds 0.0.0.0 (see below)
+# and ships no authentication of its own, so `-p 9081:9081` would put a server holding
+# your Red Hat offline token on every interface of the host. For a real deployment,
+# enable OIDC (MCP_OIDC_ENABLED=true) and put a network boundary in front of it — the
+# Helm chart does both, and refuses to publish an Ingress without them.
 # =============================================================================
 
 # Stage 1: Build
@@ -55,8 +61,18 @@ USER 185
 # The application defaults to binding 127.0.0.1; inside a container the port must be
 # reachable from outside the network namespace, so it is widened here. The access boundary
 # is then the pod and its NetworkPolicy - do not publish this port without one.
+#
+# Widening the bind address removes the protection the loopback default provided, so the
+# credential rule is tightened to compensate: in a container every caller must send their
+# own X-Red-Hat-Token, and a REDHAT_TOKEN configured on the server is never spent serving
+# someone who brought none. A startup warning is not a control; this is.
+#
+# Deployments that genuinely want the shared token (a single-tenant service behind OIDC,
+# for instance) set MCP_REQUIRE_USER_TOKEN=false explicitly - as the Helm chart does,
+# where it is a documented value rather than an accident of the image default.
 ENV QUARKUS_HTTP_HOST=0.0.0.0 \
-    QUARKUS_HTTP_PORT=9081
+    QUARKUS_HTTP_PORT=9081 \
+    MCP_REQUIRE_USER_TOKEN=true
 
 ENTRYPOINT ["java", \
     "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", \
