@@ -1,10 +1,20 @@
 name: Release Helm Chart
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Chained after the image build rather than fired by the tag directly. Both used to
+  # start in parallel on `v*`, so a Trivy gate that blocked the image still let this
+  # workflow publish a chart whose appVersion points at an image tag that never got
+  # pushed -- `helm install` then fails with ImagePullBackOff on a release that looked
+  # successful. Waiting for that workflow to conclude makes the ordering explicit.
+  workflow_run:
+    workflows: ["Release Container Image"]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.0.1). Defaults to the current ref.'
+        required: false
+        default: ''
 
 env:
   HELM_REGISTRY: ghcr.io
@@ -17,7 +27,9 @@ concurrency:
 jobs:
   release:
     name: Release Helm Chart
-    if: github.repository == 'jeanlopezxyz/mcp-redhat-kb'
+    # A failed or cancelled image build must not produce a chart: the appVersion it
+    # would carry names an image tag that was never pushed.
+    if: github.repository == 'jeanlopezxyz/mcp-redhat-kb' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -28,6 +40,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       with:
+        # Under workflow_run the ref is the default branch, not the tag that started
+        # the release, so the triggering commit is checked out explicitly.
+        ref: ${{ inputs.tag || github.event.workflow_run.head_sha }}
         # Keep the job token out of .git/config while packaging tools run.
         persist-credentials: false
 
@@ -38,13 +53,27 @@ jobs:
 
     - name: Determine chart version
       id: versions
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        INPUT_TAG: ${{ inputs.tag }}
+        # Under workflow_run this carries the tag that started the image build.
+        TRIGGER_REF: ${{ github.event.workflow_run.head_branch }}
       run: |
+        # The tag is the single source of version truth, but it reaches this workflow
+        # differently depending on how it was started: as an input on a manual run, and
+        # as the triggering workflow's head_branch when chained after the image build.
+        if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$INPUT_TAG" ]]; then
+          TAG="$INPUT_TAG"
+        else
+          TAG="$TRIGGER_REF"
+        fi
+
         # On a tag the chart takes the released version, so chart and application move
         # together. Reading it from Chart.yaml instead would republish every release under
         # the same OCI tag, silently replacing the previous chart and leaving
         # `helm upgrade` with nothing to detect.
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          CHART_VERSION="${GITHUB_REF#refs/tags/v}"
+        if [[ "$TAG" == v* ]]; then
+          CHART_VERSION="${TAG#v}"
           echo "::notice::Creating stable release: ${CHART_VERSION}"
         else
           CHART_VERSION=$(grep '^version:' charts/${{ env.CHART_NAME }}/Chart.yaml | awk '{print $2}')
@@ -59,8 +88,8 @@ jobs:
         # Strip the leading "v": the container image is tagged from semver without it
         # (release-image.yaml publishes 2.0.0, not v2.0.0), and the chart uses appVersion
         # as the default image tag. Keeping the "v" here would pull a tag that never exists.
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          APP_VERSION="${GITHUB_REF#refs/tags/v}"
+        if [[ "$TAG" == v* ]]; then
+          APP_VERSION="${TAG#v}"
         else
           APP_VERSION="latest"
         fi
@@ -73,6 +102,42 @@ jobs:
         HELM_USER: ${{ github.actor }}
       run: |
         echo "$HELM_TOKEN" | helm registry login ${{ env.HELM_REGISTRY }} -u "$HELM_USER" --password-stdin
+
+    # The workflow_run chaining orders this after the image build, but ordering is not
+    # proof: a manual run, a re-run, or an image job that succeeded without pushing all
+    # tags would still yield a chart pointing at nothing. The manifest lookup is the
+    # actual precondition -- a chart whose appVersion cannot be pulled is a broken
+    # release, and failing here is far cheaper than an ImagePullBackOff for a user.
+    - name: Verify the image the chart will point at exists
+      if: steps.versions.outputs.app_version != 'latest'
+      env:
+        IMAGE_PATH: ${{ github.repository_owner }}/${{ env.CHART_NAME }}
+        IMAGE_TAG: ${{ steps.versions.outputs.app_version }}
+        REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Queried over the registry API with curl rather than a container tool: one
+        # dependency-free HTTP call, and no second credential store to keep in sync with
+        # the helm login above. ghcr accepts the job token base64-encoded as a bearer.
+        AUTH=$(printf '%s' "$REGISTRY_TOKEN" | base64 | tr -d '\n')
+        STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+          -H "Authorization: Bearer $AUTH" \
+          -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+          "https://ghcr.io/v2/${IMAGE_PATH}/manifests/${IMAGE_TAG}")
+
+        case "$STATUS" in
+          200)
+            echo "::notice::Image ghcr.io/${IMAGE_PATH}:${IMAGE_TAG} is present"
+            ;;
+          404)
+            echo "::error::Image ghcr.io/${IMAGE_PATH}:${IMAGE_TAG} does not exist; refusing to publish a chart that cannot pull it"
+            exit 1
+            ;;
+          *)
+            # A registry hiccup or a permissions change must not silently pass as
+            # "image present", nor block a release that is otherwise sound.
+            echo "::warning::Could not verify the image (HTTP $STATUS); proceeding without the check"
+            ;;
+        esac
 
     - name: Package Helm chart
       run: |

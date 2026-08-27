@@ -190,6 +190,12 @@ Dependencies are managed in `pom.xml`. When adding new dependencies, ensure they
 ## Distribution Methods
 
 - An **npm** package is available at [npmjs.com](https://www.npmjs.com/package/mcp-redhat-kb).
-  It wraps the platform-specific binary and provides a convenient way to run the server using `npx`.
+  `npm/cli.js` downloads the released JAR, verifies it against `checksums.txt` and runs it,
+  so a JRE (25+) must be present on the machine.
 - A **container image** is built and pushed to `ghcr.io/jeanlopezxyz/mcp-redhat-kb`.
-- **Native binaries** for Linux, macOS, and Windows are available in the GitHub releases.
+- The **GitHub Release** carries the executable uber-JAR plus `checksums.txt`.
+
+Native executables are **not** published today: `release.yaml` builds the uber-JAR only.
+`./mvnw package -Pnative` works locally (see the `native` profile in `pom.xml`), and
+wiring it into the release would drop the JRE requirement above — worth doing, but it is
+a change to the release pipeline, not a documentation detail.
