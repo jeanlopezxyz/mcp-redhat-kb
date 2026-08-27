@@ -69,8 +69,7 @@ public class SecurityTools {
             return ToolResponse.error("Error: cveId is required, for example CVE-2024-6387");
         }
 
-        // Keyed by the identifier: this API takes no credential, so there is no fingerprint.
-        Optional<ToolResponse> throttled = enforceRateLimit("lookupCve", "public-security-data");
+        Optional<ToolResponse> throttled = enforceRateLimit("lookupCve");
         if (throttled.isPresent()) {
             return throttled.get();
         }
@@ -126,7 +125,7 @@ public class SecurityTools {
             return ToolResponse.error("Error: product is required");
         }
 
-        Optional<ToolResponse> throttled = enforceRateLimit("getProductLifecycle", "public-lifecycle");
+        Optional<ToolResponse> throttled = enforceRateLimit("getProductLifecycle");
         if (throttled.isPresent()) {
             return throttled.get();
         }
@@ -155,8 +154,13 @@ public class SecurityTools {
         }
     }
 
-    private Optional<ToolResponse> enforceRateLimit(String tool, String callerKey) {
-        if (rateLimiter.tryAcquire(callerKey)) {
+    /**
+     * These tools take no credential, so the limiter separates callers by identity or
+     * remote address instead. A constant key here would give every caller one shared
+     * bucket — the very starvation the limiter exists to prevent.
+     */
+    private Optional<ToolResponse> enforceRateLimit(String tool) {
+        if (rateLimiter.tryAcquire()) {
             return Optional.empty();
         }
         String reason = "rate limit exceeded (" + rateLimiter.callsPerMinute() + " calls/minute)";
