@@ -8,10 +8,22 @@ import com.fasterxml.jackson.annotation.JsonSetter;
 
 /**
  * DTO for a Red Hat Knowledge Base article.
- * Note: Solution fields can be either List<String> (with content) or String ("subscriber_only").
+ *
+ * <p>Hydra types the {@code solution_*} fields polymorphically: a {@code List<String>} when
+ * the caller is entitled to the content, and the bare string {@code "subscriber_only"} when
+ * it is not. Both collapse to {@code null} here, so {@link #isSubscriberOnly()} preserves
+ * the distinction between "withheld" and "this article has no such section" — without it a
+ * paywalled solution is indistinguishable from an empty one.
+ *
+ * <p>Verified against the live API: searching and the {@code title}, {@code abstract} and
+ * {@code issue} fields are public, while every {@code solution_*} field is withheld without
+ * a valid Red Hat token.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class KnowledgeBaseArticleDto {
+
+    /** Sentinel Hydra returns in place of solution content the credential cannot read. */
+    private static final String SUBSCRIBER_ONLY = "subscriber_only";
 
     @JsonProperty("id")
     private String id;
@@ -39,6 +51,9 @@ public class KnowledgeBaseArticleDto {
     private List<String> solutionRootcause;
     private List<String> solutionResolution;
     private List<String> solutionDiagnosticsteps;
+
+    /** Set when any solution_* field came back as the "subscriber_only" sentinel. */
+    private boolean subscriberOnly;
 
     @JsonProperty("lastModifiedDate")
     private String lastModifiedDate;
@@ -150,12 +165,23 @@ public class KnowledgeBaseArticleDto {
             return (List<String>) value;
         }
         if (value instanceof String str) {
-            if ("subscriber_only".equals(str)) {
+            if (SUBSCRIBER_ONLY.equals(str.strip())) {
+                // Remember *why* this is null: the caller lacks the entitlement, rather
+                // than the article simply not having the section.
+                this.subscriberOnly = true;
                 return null;
             }
             return List.of(str);
         }
         return null;
+    }
+
+    /**
+     * Whether Red Hat withheld solution content because the credential is not entitled to
+     * it. True means a valid subscription token would return more than this response does.
+     */
+    public boolean isSubscriberOnly() {
+        return subscriberOnly;
     }
 
     public String getLastModifiedDate() {

@@ -5,7 +5,8 @@ MCP Server for searching the Red Hat Knowledge Base (Hydra API).
 ## Requirements
 
 - Java 25+
-- Red Hat API Token
+- A Red Hat API token — required for the Knowledge Base tools, and the extent of your
+  subscription decides how much of each article is returned
 
 ## Installation
 
@@ -46,9 +47,15 @@ Add to your MCP client configuration (VS Code, Cursor, Windsurf, etc.):
 ## Available Tools
 
 - **searchKnowledgeBase**: Search Red Hat Knowledge Base for solutions and articles
-- **getArticle**: Get the full content of a Knowledge Base article
+- **getArticle**: Get the content of a Knowledge Base article
 - **lookupCve**: Look up a CVE — severity, CVSS score, affected products and fixes
 - **getProductLifecycle**: Support phases and end-of-life dates for a product
+
+`lookupCve` and `getProductLifecycle` use Red Hat's public APIs and work without a token.
+The two Knowledge Base tools need one: Red Hat serves an article's problem statement to any
+authenticated caller but withholds the root cause, resolution and diagnostic steps unless
+the subscription covers them. When that happens the response says so explicitly rather than
+returning an article that merely looks empty.
 
 ## Usage
 

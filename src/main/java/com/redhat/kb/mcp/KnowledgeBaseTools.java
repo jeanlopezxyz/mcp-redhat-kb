@@ -124,9 +124,12 @@ public class KnowledgeBaseTools {
     @Tool(
             name = "getArticle",
             title = "Get Knowledge Base article",
-            description = "Retrieve the full content of a Knowledge Base article: environment, issue, "
+            description = "Retrieve the content of a Knowledge Base article: environment, issue, "
                     + "root cause, diagnostic steps and resolution. Use a numeric article ID returned "
-                    + "by searchKnowledgeBase. Long articles are truncated.",
+                    + "by searchKnowledgeBase. Long articles are truncated. Without an entitled Red Hat "
+                    + "subscription the problem description is returned but the root cause, resolution "
+                    + "and diagnostic steps are withheld; the response says so explicitly when that "
+                    + "happens, so report it rather than concluding the article has no fix.",
             annotations = @Tool.Annotations(
                     readOnlyHint = true,
                     destructiveHint = false,

@@ -266,6 +266,38 @@ caller's personal credential — there is no second user to isolate them from, a
 to carry a different token. The setting is ignored there (with a warning at startup), so the
 same configuration works for both transports.
 
+### Entitlements
+
+A token is not all-or-nothing: it decides *how much* of an article comes back. Measured by
+calling the Hydra API directly (21 articles, 8 document kinds), which is what an
+unentitled credential sees:
+
+| Field | Unentitled | Entitled |
+|---|---|---|
+| Search (IDs, titles, `numFound`) | ✅ | ✅ |
+| `title`, `abstract`, `issue` | ✅ Full text | ✅ |
+| `solution_rootcause` | ❌ `subscriber_only` | ✅ |
+| `solution_resolution` | ❌ `subscriber_only` | ✅ |
+| `solution_environment` | ❌ `subscriber_only` | ✅ |
+
+All 21 withheld all three solution fields — including document kinds that look public, such
+as `DevelopersBlogPost`. `abstract` and `issue`, by contrast, are substantial: one article
+returned over 9 KB of problem description. So the problem statement is readable but **the
+fix never is**, which is the point of the Knowledge Base.
+
+Two distinct failure modes, easy to confuse:
+
+- **No token at all** — the SSO exchange fails before the API is reached, and the tool
+  returns an error. The server never issues an unauthenticated request.
+- **A valid token without the entitlement** — HTTP 200, but solution fields arrive as the
+  string `subscriber_only`. `KnowledgeBaseArticleDto` maps them to `null` *and* records
+  `isSubscriberOnly()`, so "withheld" stays distinguishable from "this article has no such
+  section" — without that flag both are just `null`, and a model reading a detailed problem
+  with no resolution would reasonably conclude no fix exists.
+
+The two `SecurityTools` tools (`lookupCve`, `getProductLifecycle`) are unaffected: they use
+Red Hat's public APIs and need no credential.
+
 ### Rate limiting and audit
 
 Calls are capped per caller — by authenticated identity where there is one, by credential
@@ -309,12 +341,19 @@ Results report how many articles matched in total, so the assistant can tell a p
 search from one that needs narrowing.
 
 #### `getArticle`
-Retrieve the full content of an article: environment, issue, root cause, diagnostic steps and
+Retrieve the content of an article: environment, issue, root cause, diagnostic steps and
 resolution. Long articles are truncated to keep context usage bounded.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `articleId` | string | Yes | Numeric article ID from search results |
+
+How much of an article you get depends on the entitlements of the token you supply. Red Hat
+serves the problem statement to any authenticated caller but returns the sentinel
+`subscriber_only` in place of the root cause, resolution and diagnostic steps when the
+subscription does not cover them. The response then carries `subscriberOnly: true` and says
+so in the text, so an assistant reports a paywall instead of concluding the article has no
+fix. See [Entitlements](#entitlements).
 
 #### `lookupCve`
 Look up a CVE in Red Hat's security database: severity, CVSS v3 score, which products have a

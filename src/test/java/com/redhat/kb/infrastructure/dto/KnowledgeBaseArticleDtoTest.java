@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +44,19 @@ class KnowledgeBaseArticleDtoTest {
 
         assertNull(dto.getSolutionResolution());
         assertNull(dto.getSolutionRootcause());
+        assertTrue(dto.isSubscriberOnly());
+    }
+
+    @Test
+    @DisplayName("distinguishes withheld content from an article that simply lacks the section")
+    void absentFieldIsNotSubscriberOnly() throws Exception {
+        // Both leave getSolutionResolution() null, so only the flag tells them apart — and
+        // the difference decides whether a token would help.
+        KnowledgeBaseArticleDto dto = mapper.readValue(
+                "{\"id\":\"1\",\"title\":\"No solution section\"}", KnowledgeBaseArticleDto.class);
+
+        assertNull(dto.getSolutionResolution());
+        assertFalse(dto.isSubscriberOnly());
     }
 
     @Test

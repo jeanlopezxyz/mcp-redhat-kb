@@ -22,5 +22,9 @@ public record ArticleDetail(
         @JsonPropertyDescription("Underlying cause") List<String> rootCause,
         @JsonPropertyDescription("Steps to confirm the diagnosis") List<String> diagnosticSteps,
         @JsonPropertyDescription("Steps that resolve the problem") List<String> resolution,
-        @JsonPropertyDescription("Whether content was omitted to stay within size limits") boolean truncated) {
+        @JsonPropertyDescription("Whether content was omitted to stay within size limits") boolean truncated,
+        @JsonPropertyDescription("Whether Red Hat withheld the solution sections because the "
+                + "credential is not entitled to them; when true, root cause, resolution and "
+                + "diagnostic steps are empty for lack of a subscription, not because the "
+                + "article omits them") boolean subscriberOnly) {
 }

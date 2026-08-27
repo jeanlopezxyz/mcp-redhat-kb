@@ -50,6 +50,17 @@ Two identities must never be conflated:
   over the server's shared token, and `redhat.api.require-user-token` removes the shared
   fallback entirely.
 
+A token also decides *how much* of an article comes back, not just whether the call
+succeeds. Verified against the live API over 21 articles and 8 document kinds: search,
+`title`, `abstract` and `issue` are served to any authenticated caller, while
+`solution_rootcause`, `solution_resolution` and `solution_environment` come back as the
+sentinel string `subscriber_only` in every case the subscription does not cover — with no
+exceptions, including document kinds that look public. `KnowledgeBaseArticleDto` maps those
+to `null` and records `isSubscriberOnly()`; keep that flag, because without it "withheld"
+and "this article has no such section" are the same `null`, and a model that reads a
+detailed problem with no resolution concludes there is no fix. `ArticleFormatter` therefore
+emits its notice outside the untrusted-content fence — it is our text, not upstream's.
+
 Forwarding the inbound token upstream ("token passthrough") is forbidden by the
 specification and by this design. Access tokens and Knowledge Base results are cached per
 credential, keyed by `RedHatCredential.fingerprint()` — a SHA-256 prefix, so cache keys and
