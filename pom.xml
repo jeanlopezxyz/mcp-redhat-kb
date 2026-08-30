@@ -18,7 +18,7 @@
         <!-- 2.0.0.CR2 implements MCP specification 2026-07-28 (stateless core,
              server/discover) and is built against Quarkus 3.33.3.1. -->
         <quarkus-mcp-server.version>2.0.0.CR2</quarkus-mcp-server.version>
-        <jsoup.version>1.21.2</jsoup.version>
+        <jsoup.version>1.23.2</jsoup.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
     </properties>
