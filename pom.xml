@@ -14,7 +14,7 @@
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <!-- 3.33.x is the current LTS line; 3.33.3.1 carries the security fixes
              for CVE-2026-39852 (quarkus-vertx-http authorization bypass). -->
-        <quarkus.platform.version>3.33.3.1</quarkus.platform.version>
+        <quarkus.platform.version>3.39.1</quarkus.platform.version>
         <!-- 2.0.0.CR2 implements MCP specification 2026-07-28 (stateless core,
              server/discover) and is built against Quarkus 3.33.3.1. -->
         <quarkus-mcp-server.version>2.0.0.CR2</quarkus-mcp-server.version>
