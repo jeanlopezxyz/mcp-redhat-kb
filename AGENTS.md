@@ -21,11 +21,17 @@ Built with Quarkus MCP Server, this enables AI assistants to search and retrieve
     - `infrastructure/config/` - configuration classes (RedHatApiConfig).
     - `mcp/` - MCP tool definitions (KnowledgeBaseTools for the credentialed Knowledge
       Base, SecurityTools for Red Hat's public CVE and life cycle APIs), plus the
-      formatters and ContentSanitizer that render content for the model.
+      formatters and ContentSanitizer that render content for the model. The checks and
+      failures every tool shares live in `ToolGuards` (argument validation, rate limiting)
+      and `ToolErrors` (exception to client error): both tool classes previously kept
+      their own copy of each, and the copies drifted.
 
   A tool that declares `outputSchema` **must** return structured content on every success,
-  including empty-result branches — a client rejects the whole call otherwise and the
-  model never sees the message. `StructuredContentContractTest` guards this.
+  including empty-result branches: the specification's obligation on servers is
+  unconditional — *"If an output schema is provided: Servers MUST provide structured
+  results that conform to this schema"*. Validation is only a SHOULD on clients, but
+  several SDKs enforce it by erroring, and then the model never sees the message at all.
+  `StructuredContentContractTest` guards this.
     - `KnowledgeBaseConstants.java` - shared constants.
   - `src/main/resources/` - application configuration files.
   - `src/test/java/` - test sources, mirroring the main package layout.
@@ -34,8 +40,15 @@ Built with Quarkus MCP Server, this enables AI assistants to search and retrieve
 - `.github/` - GitHub-related configuration (Actions workflows, Dependabot).
 - `.mvn/` - Maven wrapper configuration.
 - `npm/` - Node packages that wrap the compiled binary for distribution through npmjs.com.
+- `scripts/` - `mcp-inspect.sh`, which drives the packaged JAR through the official MCP
+  Inspector, and `mcp-conformance.sh`, which runs the specification's conformance suite
+  against it with `conformance-expected-failures.yaml` as its baseline (see Tests).
 - `Dockerfile` - Container image description file.
 - `pom.xml` - Maven project configuration and dependencies.
+- `server.json` - the MCP Registry entry; its `name` must match `mcpName` in
+  `npm/package.json` (see Releasing).
+- `smithery.yaml` - listing metadata for the Smithery MCP directory.
+- `.sdkmanrc` - pins the JDK the build expects (see Building).
 
 There are deliberately two layers, `mcp/` over `infrastructure/`, and no `domain/` or
 `application/` between them: this server is a thin proxy over the Hydra API with no
@@ -87,7 +100,9 @@ Why it is built this way:
   [paper](https://www.microsoft.com/en-us/research/publication/defending-against-indirect-prompt-injection-attacks-with-spotlighting/),
   [shipped in Azure AI Foundry](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/better-detecting-cross-prompt-injection-attacks-introducing-spotlighting-in-azur/4458404),
   [recommended for MCP](https://developer.microsoft.com/blog/protecting-against-indirect-injection-attacks-mcp/).
-  Another MCP server ships the same pattern:
+  Another MCP server treats the same problem as load-bearing, though it solves it
+  differently — Arcjet separates trusted from untrusted *fields* rather than fencing text,
+  on the rule that "trusted guidance must never contain untrusted text":
   [Arcjet](https://blog.arcjet.com/how-we-defend-mcp-tool-outputs-from-prompt-injection/).
 - **It is best-effort, not a hard control.** Adaptive attackers defeat spotlighting, and
   Anthropic states prompt injection is
@@ -110,7 +125,7 @@ the [Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/) and
 |---|---|---|
 | MCP01 Token mismanagement | Met | `RedHatCredential` — a SHA-256 fingerprint is the only identifier reaching logs and cache keys |
 | MCP02 Privilege escalation | Met | Every tool is read-only and says so; audience validation (RFC 8707) |
-| MCP03 Tool poisoning | Met, best-effort | `ContentSanitizer` + `UntrustedFence`; URLs accepted only under `https://*.redhat.com` |
+| MCP03 Tool poisoning | Met, best-effort | `ContentSanitizer` + `UntrustedFence`; URLs accepted only over https under `redhat.com` or a subdomain of it |
 | MCP04 Supply chain | Met | Actions pinned by SHA, Trivy gates the push, signed provenance, CycloneDX SBOM (`-Psbom`) |
 | MCP05 Command injection | Met | No process execution; Lucene escaping, anchored id patterns, everything URL-encoded |
 | MCP06 Intent flow subversion | Met, best-effort | Our text outside the fence, upstream text inside |
@@ -122,9 +137,8 @@ the [Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/) and
 | LLM09 Misinformation | Met | `subscriberOnly` separates withheld content from absent content |
 | LLM10 Unbounded consumption | Met | Per-caller rate limiting, streaming size caps, per-section budgets, timeouts |
 
-Two residual risks are accepted rather than fixed:
+One residual risk is accepted rather than fixed:
 
-- `quarkus-mcp-server` is pinned to a candidate release because no GA exists yet.
 - A direct JWT's `exp` is trusted without signature verification — see `MAX_CACHE_DURATION`
   in `RedHatAuthClient` for why verifying it would add nothing, and why the reuse window is
   capped at five minutes instead.
@@ -191,11 +205,13 @@ Requires **JDK 25**. `.sdkmanrc` pins it, so run `sdk env` first — a machine-w
 ./mvnw package -Pnative
 ```
 
-The resulting executable JAR is in `target/`.
+`package` produces `target/quarkus-app/quarkus-run.jar`. The single-file uber-JAR the
+release publishes is a separate packaging (`-Dquarkus.package.jar.type=uber-jar`), built by
+`release.yaml` rather than by a plain `package`.
 
 ## Releasing
 
-A `v*` tag drives four channels: GitHub Release (JAR + `checksums.txt`), npm, the container
+A `v*` tag drives five channels: GitHub Release (JAR + `checksums.txt`), npm, the container
 image on ghcr.io, the Helm chart, and the MCP Registry.
 
 Things that are easy to break, and are wired the way they are on purpose:
@@ -235,16 +251,86 @@ Run all tests with:
 ./mvnw test
 ```
 
-Two layers, both deterministic and offline:
+Five layers. The first three are deterministic and offline; the fourth needs Docker, and
+the conformance suite needs a network (it is fetched with `npx`) but no credentials.
+
+Which tool proves what, since several are easy to confuse:
+
+| Tool | Answers |
+|---|---|
+| **McpAssured** | does the protocol surface match what a model reasons about? |
+| **conformance** | does the wire format match the specification's own schemas? |
+| **json-schema-validator** | does `structuredContent` actually conform to the published `outputSchema`? |
+| **Keycloak (Testcontainers)** | is a token for another audience really refused? |
+| **WireMock** | what happens when upstream stalls or cuts the body mid-transfer? |
+| **ArchUnit** | do the rules in this document still hold? |
+| **PIT** (`-Pmutation`) | would a test notice if the code changed? |
+
+ArchUnit, WireMock and PIT are ordinary Java tooling, not MCP-specific — they are here because
+they catch things this server gets wrong, not because the protocol asks for them.
+
 
 - **Unit tests** for the logic with real decisions: `SolrQueryTest` (Lucene escaping and
   article-ID validation), `ContentSanitizerTest` (HTML stripping, marker neutralization,
   truncation), `ArticleFormatterTest` (rendering and URL trust), `KnowledgeBaseArticleTest`
-  (the polymorphic `solution_*` fields Hydra returns).
+  (the polymorphic `solution_*` fields Hydra returns), `ToolAuditLogTest` (the argument
+  preview, which is what keeps the MCP08 promise that no token reaches the log).
 - **Protocol tests** with McpAssured (`quarkus-mcp-server-test`): `KnowledgeBaseToolsProtocolTest`
   drives a real `@QuarkusTest` server over MCP and asserts the tool catalogue, the generated
   JSON Schema and the tool annotations. Treat it as a contract test — the schema and
   descriptions are the interface a model reasons about, so changing them should fail here.
+
+- **Policy tests**, also `@QuarkusTest`, each pinning a security decision under the profile
+  that makes it observable — they are why the OWASP table above can claim what it claims:
+  `McpAuthenticationTest` (anonymous calls refused, `/q/*` and metadata policy),
+  `LegacySseDisabledTest` (the deprecated SSE transport stays shut while Streamable HTTP
+  works), `UserTokenRequiredTest` (`redhat.api.require-user-token` removes the shared
+  fallback), `CachePartitioningTest` and `CacheKeyContractTest` (no cache entry is ever
+  shared across credentials), `StartupConfigCheckTest` (the warn-to-error escalation, where
+  the *level* is the assertion: the same settings are routine on loopback and dangerous once
+  the port is published). The credential and transport units sit here too:
+  `RedHatCredentialTest`, `CredentialResolverTest`, `RedHatAuthClientTest`,
+  `RateLimiterTest`, `UntrustedFenceTest`, `SecurityFormatterTest`, `RedHatApiConfigTest`
+  and the three `*HttpTest` clients, which run against `StubApiServer` rather than the
+  network.
+
+  Fixtures shared by more than one class live in `com.redhat.kb.testing`
+  (`TestJwt.unsigned(...)`); `StubApiServer` stays package-private in
+  `infrastructure.client`, alongside its three callers.
+
+- **Conformance and structure tests**, which pin obligations rather than behaviour:
+
+  `OutputSchemaConformanceTest` validates each tool's `structuredContent` against the
+  `outputSchema` that same tool publishes in `tools/list`, using a JSON Schema 2020-12
+  validator. Asserting the payload is merely present does not discharge *"Servers MUST
+  provide structured results that conform to this schema"* — the empty-result branches are
+  where that breaks, so they are the ones covered.
+
+  `ToolsListInvarianceTest` opens two independent connections and requires the same tools in
+  the same order: the catalogue *"MUST NOT vary per-connection"* and *"SHOULD"* be ordered
+  deterministically.
+
+  `ArchitectureTest` (ArchUnit) turns this document into build failures — the one-way
+  dependency between the two layers, the package-private rendering pipeline, and that
+  nothing writes to `System.out`, which under stdio would corrupt the protocol stream.
+
+  `BoundedJsonHttpFaultTest` (WireMock) covers what `StubApiServer` cannot express: an
+  upstream that accepts a request and stalls, one that cuts the body mid-transfer, one that
+  exceeds the size cap, and the guarantee that an error body is never downloaded.
+
+- **A test that needs Docker**: `AudienceValidationTest` starts a real Keycloak and proves
+  that a token signed by the right realm, for the right user, unexpired, is still refused
+  when its audience is another service. Every other `@QuarkusTest` here runs with
+  `quarkus.oidc.enabled=false`, so before this the MCP07 control was documented but never
+  executed. It provisions its own audience mappers through the admin API, because the
+  default realm puts none on any client. Skip it with `-Dtest='!AudienceValidationTest'`
+  where no container runtime is available.
+
+- **Mutation testing**, `./mvnw test-compile org.pitest:pitest-maven:mutationCoverage
+  -Pmutation`. Coverage says a line ran; this says an assertion would have caught it
+  changing. It is what surfaced that `ToolGuards` — the input validation every tool depends
+  on — had no test of its own: 86% of mutations killed today, from 76% before that gap was
+  closed. Report in `target/pit-reports/`. Not part of the normal build.
 
 - **Manual protocol checks** with the official MCP Inspector, via `scripts/mcp-inspect.sh`:
 
@@ -261,6 +347,43 @@ Two layers, both deterministic and offline:
   appends its own flags to the server command (so `java` must be wrapped, or it prints its
   usage and the connection dies), and it exits with code 5 when a tool returns
   `isError: true` — that is the tool reporting, not the Inspector failing.
+
+- **Official conformance suite**, [modelcontextprotocol/conformance](https://github.com/modelcontextprotocol/conformance),
+  via `scripts/mcp-conformance.sh`. It checks the wire format against the specification's
+  own schemas. McpAssured proves *these tools* behave; this proves *the protocol* does,
+  including the parts the extension generates rather than this code — which is what makes
+  it worth having when the SDK is upgraded. It runs in `build.yaml`.
+
+  ```bash
+  ./mvnw package -DskipTests
+  scripts/mcp-conformance.sh                  # active suite against the baseline
+  scripts/mcp-conformance.sh --scenario tools-list
+  JAR=/path/to/released.jar scripts/mcp-conformance.sh
+  ```
+
+  The script starts the packaged JAR on 127.0.0.1:9099, polls `initialize` until it
+  answers, runs the suite and shuts the server down. It overrides two settings the suite
+  cannot satisfy — `quarkus.oidc.enabled=false` and the `/mcp` policy set to `permit` —
+  because the suite is an unauthenticated client with no notion of Keycloak. Those are
+  command-line overrides only: the shipped defaults stay authenticated, and
+  `McpAuthenticationTest` is what pins that.
+
+  Nine scenarios pass and twenty-two fail, and the failures are the reason the run needs
+  `scripts/conformance-expected-failures.yaml`. The suite is written against the
+  specification's reference server, which publishes `test_*` tools, `test://` resources and
+  `test_*` prompts for it to drive; this server has its own tools and declares neither
+  `resources` nor `prompts`, so those scenarios cannot apply. Verified case by case: each
+  one fails with the *correct* JSON-RPC error (`-32602 Invalid tool name`, `-32002 Resource
+  not found`), which is the right answer to a request for something absent.
+
+  The baseline is what makes this a signal rather than noise — 22 red lines nobody reads is
+  the usual reason this tool gets wired up and then ignored. It fails the build in **both**
+  directions: a scenario failing outside the list, and a listed scenario that starts
+  passing (a stale entry). Both were confirmed by running it against a deliberately wrong
+  baseline. So the eight scenarios deliberately kept out of the list — `server-initialize`,
+  `ping`, `logging-set-level`, `tools-list`, `server-sse-multiple-streams`,
+  `resources-list`, `prompts-list`, `dns-rebinding-protection` — must always pass, and an
+  SDK upgrade that breaks the handshake or the transport says so.
 
 `evals/` is a separate concern: mcpchecker runs an LLM agent against the server to judge
 whether tasks succeed. It is non-deterministic and costs API credits, so run it before a

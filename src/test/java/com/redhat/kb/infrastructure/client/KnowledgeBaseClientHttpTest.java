@@ -6,12 +6,11 @@ import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
 import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.model.SearchPage;
 
-import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
+import com.redhat.kb.testing.TestJwt;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -134,6 +133,22 @@ class KnowledgeBaseClientHttpTest {
 
         assertTrue(client.getArticle(credential, "999999999", "").isEmpty(),
                 "a document with a different id must not be returned as the one requested");
+    }
+
+    @Test
+    @DisplayName("finds an advisory whose id was given in lower case")
+    void getArticleMatchesAnAdvisoryCaseInsensitively() {
+        // `isValidArticleId` is CASE_INSENSITIVE and SolrQueryTest pins that `rhba-2025:1234`
+        // is accepted, but Hydra answers with the canonical upper-case id. While the guard
+        // above compared with `equals`, every lower-case advisory validated, ran, matched
+        // nothing and was reported as "no article found" -- indistinguishable to the model
+        // from an advisory that does not exist.
+        server.respond(200, """
+                {"response":{"numFound":1,"docs":[{"id":"RHSA-2026:6565","title":"An advisory"}]}}""");
+
+        assertEquals("RHSA-2026:6565",
+                client.getArticle(credential, "rhsa-2026:6565", "").orElseThrow().getId(),
+                "an advisory must be found whatever case the caller used");
     }
 
     @Test
@@ -277,13 +292,7 @@ class KnowledgeBaseClientHttpTest {
         return config;
     }
 
-    /** Builds an unsigned JWT so the auth client returns it directly, with no SSO call. */
     private static String jwt(String subject, long expiresInSeconds) {
-        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
-        String header = encoder.encodeToString("{\"alg\":\"none\"}".getBytes());
-        String payload = encoder.encodeToString(
-                ("{\"sub\":\"" + subject + "\",\"exp\":"
-                        + (Instant.now().getEpochSecond() + expiresInSeconds) + "}").getBytes());
-        return header + "." + payload + ".signature";
+        return TestJwt.unsigned(subject, expiresInSeconds);
     }
 }

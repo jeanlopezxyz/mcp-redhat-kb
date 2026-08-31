@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import static com.redhat.kb.KnowledgeBaseConstants.DEFAULT_MAX_RESULTS;
-import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
 import static com.redhat.kb.KnowledgeBaseConstants.MAX_RESULTS;
 import static com.redhat.kb.KnowledgeBaseConstants.MIN_RESULTS;
 
@@ -117,9 +116,17 @@ public class KnowledgeBaseTools {
                 // A declared output schema obliges every successful response to carry
                 // structured content, so an empty result set ships an empty record rather
                 // than text alone.
+                // The query is echoed through the sanitizer for the same reason the
+                // populated branch does it (ArticleFormatter.formatSearchResults): this
+                // text sits outside the untrusted-content fence, so it reads as the
+                // server's own voice, and a query carrying `===` or `---` would plant a
+                // structural marker there. The value is the caller's rather than
+                // upstream's, but it is not necessarily the user's -- a model acting on
+                // injected content earlier in the conversation is what would compose one.
                 return new ToolResponse(
                         false,
-                        List.of(new TextContent("No results found for: " + query.strip()
+                        List.of(new TextContent("No results found for: "
+                                + ContentSanitizer.clean(query.strip())
                                 + "\nTry broader keywords, or omit the product/documentType filters."
                                 + "\nNote that product is matched exactly, so it must be the full name,"
                                 + " for example 'Red Hat OpenShift Container Platform'.")),

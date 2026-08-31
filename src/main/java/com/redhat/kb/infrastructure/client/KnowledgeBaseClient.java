@@ -129,7 +129,13 @@ public class KnowledgeBaseClient {
                 .stream()
                 // Belt and braces: never return an article whose id is not the one asked
                 // for, whatever the filter did upstream.
-                .filter(article -> articleId.equals(article.getId()))
+                //
+                // Compared without case because validation accepts an advisory in either
+                // case (`isValidArticleId` is CASE_INSENSITIVE) while Hydra always answers
+                // with the canonical upper-case form. An exact `equals` therefore dropped
+                // every match for `rhsa-2026:6565` and reported the article as missing --
+                // a lookup that validated, ran, and then silently found nothing.
+                .filter(article -> articleId.equalsIgnoreCase(article.getId()))
                 .toList();
 
         return pick(matches, documentKind);

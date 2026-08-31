@@ -43,3 +43,10 @@ jobs:
         run: ./mvnw package -DskipTests
       - name: Test
         run: ./mvnw test
+      # Runs the packaged JAR through the specification's own conformance suite. The Java
+      # tests assert that these tools behave; this asserts that the protocol does,
+      # including the parts the Quarkus MCP extension generates rather than this codebase.
+      # Failures are compared against scripts/conformance-expected-failures.yaml, so the
+      # step goes red both on a new failure and on a baseline entry that starts passing.
+      - name: MCP conformance
+        run: scripts/mcp-conformance.sh
