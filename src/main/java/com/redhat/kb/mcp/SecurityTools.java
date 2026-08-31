@@ -8,7 +8,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.client.LifecycleClient;
 import com.redhat.kb.infrastructure.client.SecurityDataClient;
 
@@ -20,8 +19,6 @@ import io.quarkiverse.mcp.server.ToolResponse;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-
-import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
 
 /**
  * MCP tools backed by Red Hat's public product APIs.
@@ -35,17 +32,22 @@ import static com.redhat.kb.KnowledgeBaseConstants.MAX_QUERY_LENGTH;
 @ApplicationScoped
 public class SecurityTools {
 
-    @Inject
-    SecurityDataClient securityData;
+    /** Stands in for the credential fingerprint in the audit trail: these APIs take none. */
+    private static final String NO_CREDENTIAL = "none-public-api";
+
+    private final SecurityDataClient securityData;
+    private final LifecycleClient lifecycle;
+    private final ToolAuditLog audit;
+    private final RateLimiter rateLimiter;
 
     @Inject
-    LifecycleClient lifecycle;
-
-    @Inject
-    ToolAuditLog audit;
-
-    @Inject
-    RateLimiter rateLimiter;
+    public SecurityTools(SecurityDataClient securityData, LifecycleClient lifecycle,
+            ToolAuditLog audit, RateLimiter rateLimiter) {
+        this.securityData = securityData;
+        this.lifecycle = lifecycle;
+        this.audit = audit;
+        this.rateLimiter = rateLimiter;
+    }
 
     @Tool(
             name = "lookupCve",
@@ -67,7 +69,7 @@ public class SecurityTools {
     public ToolResponse lookupCve(
             @ToolArg(description = "CVE identifier, e.g. 'CVE-2024-6387'") String cveId) {
 
-        Optional<ToolResponse> rejection = validate("cveId", cveId,
+        Optional<ToolResponse> rejection = ToolGuards.validate("cveId", cveId,
                 "Error: cveId is required, for example CVE-2024-6387");
         if (rejection.isPresent()) {
             return rejection.get();
@@ -77,7 +79,7 @@ public class SecurityTools {
         if (throttled.isPresent()) {
             return throttled.get();
         }
-        audit.record("lookupCve", cveId, "none-public-api");
+        audit.record("lookupCve", cveId, NO_CREDENTIAL);
 
         try {
             Optional<JsonNode> record = securityData.lookupCve(cveId);
@@ -125,7 +127,7 @@ public class SecurityTools {
             @ToolArg(description = "Full product name, e.g. 'Red Hat OpenShift Container Platform'")
             String product) {
 
-        Optional<ToolResponse> rejection = validate("product", product,
+        Optional<ToolResponse> rejection = ToolGuards.validate("product", product,
                 "Error: product is required");
         if (rejection.isPresent()) {
             return rejection.get();
@@ -135,7 +137,7 @@ public class SecurityTools {
         if (throttled.isPresent()) {
             return throttled.get();
         }
-        audit.record("getProductLifecycle", product, "none-public-api");
+        audit.record("getProductLifecycle", product, NO_CREDENTIAL);
 
         try {
             Optional<JsonNode> record = lifecycle.lookupProduct(product);
@@ -161,35 +163,11 @@ public class SecurityTools {
     }
 
     /**
-     * Rejects an argument that is absent or implausibly long.
-     *
-     * <p>The length cap matters as much here as on the Knowledge Base tools: without it a
-     * megabyte-long product name would consume this caller's rate-limit budget and be
-     * URL-encoded into an upstream request before anything noticed.
-     */
-    private Optional<ToolResponse> validate(String argName, String value, String missingMessage) {
-        if (value == null || value.isBlank()) {
-            return Optional.of(ToolResponse.error(missingMessage));
-        }
-        if (value.length() > MAX_QUERY_LENGTH) {
-            return Optional.of(ToolResponse.error(
-                    "Error: " + argName + " too long (max " + MAX_QUERY_LENGTH + " chars)"));
-        }
-        return Optional.empty();
-    }
-
-    /**
      * These tools take no credential, so the limiter separates callers by identity or
      * remote address instead. A constant key here would give every caller one shared
      * bucket — the very starvation the limiter exists to prevent.
      */
     private Optional<ToolResponse> enforceRateLimit(String tool) {
-        if (rateLimiter.tryAcquire()) {
-            return Optional.empty();
-        }
-        String reason = "rate limit exceeded (" + rateLimiter.callsPerMinute() + " calls/minute)";
-        audit.recordDenied(tool, reason);
-        return Optional.of(ToolResponse.error("Error: " + reason + ". Wait a moment before retrying."));
+        return ToolGuards.enforceRateLimit(rateLimiter, audit, tool, Optional.empty());
     }
-
 }

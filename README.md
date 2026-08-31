@@ -48,14 +48,20 @@ The assistant searches, picks the relevant articles and reads them in full. Requ
 ## Table of Contents
 
 - [Quick start](#quick-start)
+- [Requirements](#requirements)
 - [Installation](#installation)
-- [Example prompts](#example-prompts)
-- [Tools](#tools)
 - [Configuration](#configuration)
 - [Authentication (Keycloak)](#authentication-keycloak)
+  - [Credential model](#credential-model)
+  - [Entitlements](#entitlements) — what a token does and does not unlock
+  - [Rate limiting and audit](#rate-limiting-and-audit)
+- [Tools](#tools)
+- [Example prompts](#example-prompts)
 - [Transport modes](#transport-modes)
 - [Development](#development)
 - [Kubernetes / OpenShift](#kubernetes--openshift-deployment)
+- [Related Projects](#related-projects)
+- [License](#license)
 
 ---
 
@@ -359,7 +365,8 @@ resolution. Long articles are truncated to keep context usage bounded.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `articleId` | string | Yes | Numeric article ID from search results |
+| `articleId` | string | Yes | An ID from search results: an article number such as `5049001`, or an advisory such as `RHSA-2026:6565` |
+| `documentKind` | string | No | The kind shown next to that ID in the search results (`Solution`, `Vulnerability`, `Errata`...). IDs are reused across kinds, so passing it is what stops an unrelated document being returned |
 
 How much of an article you get depends on the entitlements of the token you supply. Red Hat
 serves the problem statement to any authenticated caller but returns the sentinel

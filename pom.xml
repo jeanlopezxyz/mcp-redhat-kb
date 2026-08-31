@@ -16,10 +16,22 @@
         <!-- 3.33.x is the current LTS line; 3.33.3.1 carries the security fixes
              for CVE-2026-39852 (quarkus-vertx-http authorization bypass). -->
         <quarkus.platform.version>3.33.3.1</quarkus.platform.version>
-        <!-- 2.0.0.CR2 implements MCP specification 2026-07-28 (stateless core,
-             server/discover) and is built against Quarkus 3.33.3.1. -->
-        <quarkus-mcp-server.version>2.0.0.CR2</quarkus-mcp-server.version>
+        <!-- 2.0.0 implements MCP specification 2026-07-28 (stateless core,
+             server/discover) and is built against Quarkus 3.33.3.1, the platform pinned
+             above. -->
+        <quarkus-mcp-server.version>2.0.0</quarkus-mcp-server.version>
         <jsoup.version>1.21.2</jsoup.version>
+        <!-- Test-only tooling. Kept on the latest stable line rather than the newest
+             release: AssertJ 4 and WireMock 4 are still milestone/beta. -->
+        <assertj.version>3.27.7</assertj.version>
+        <archunit.version>1.5.0</archunit.version>
+        <wiremock.version>3.13.2</wiremock.version>
+        <pitest.version>1.30.0</pitest.version>
+        <pitest-junit5.version>1.2.3</pitest-junit5.version>
+        <!-- Not managed by the Quarkus BOM (which only manages io.rest-assured's
+             validator of the same artifact name), so the version must live here. -->
+        <json-schema-validator.version>1.5.9</json-schema-validator.version>
+        <keycloak.version>26.7.2</keycloak.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
     </properties>
@@ -101,6 +113,43 @@
             <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- AssertJ: assertions that report the actual value on failure, not just "false" -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- ArchUnit: turns the layering rules described in AGENTS.md into build failures -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- WireMock: upstream failures StubApiServer cannot express (delays, dropped bodies) -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock</artifactId>
+            <version>${wiremock.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- A real Keycloak, so audience validation (RFC 8707) is exercised rather than
+             switched off as it is in the other @QuarkusTest profiles. Version comes from
+             the Quarkus BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-keycloak-server</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Validates a tool's structuredContent against the outputSchema it publishes.
+             The specification makes conformance the obligation, not mere presence. -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json-schema-validator.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -135,6 +184,14 @@
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
+                        <!-- Image for the Keycloak that AudienceValidationTest starts. Pinned
+                             to a patch rather than a floating tag so a rebuild tests the same
+                             authorization server. -->
+                        <keycloak.version>${keycloak.version}</keycloak.version>
+                        <!-- Plain HTTP: the container's self-signed certificate is not in any
+                             trust store, so the HTTPS health probe never completes. The realm
+                             is loopback-only and lives for the length of one test class. -->
+                        <keycloak.use.https>false</keycloak.use.https>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
@@ -142,6 +199,73 @@
     </build>
 
     <profiles>
+        <!--
+            `./mvnw test -Pmutation` re-runs the suite against deliberately broken copies of
+            the code and reports which mutations no test noticed. Coverage says a line ran;
+            this says an assertion would have caught it changing. Off by default because it
+            re-runs the suite once per mutation.
+
+            Scoped to the classes whose logic decides something — the sanitizer, the fence,
+            the limiter, the audit preview, the startup check and the query escaping. The
+            formatters and models are rendering and data, where a surviving mutation usually
+            means a cosmetic string, not a missing test.
+        -->
+        <profile>
+            <id>mutation</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>${pitest.version}</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>${pitest-junit5.version}</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetClasses>
+                                <param>com.redhat.kb.mcp.ContentSanitizer</param>
+                                <param>com.redhat.kb.mcp.UntrustedFence</param>
+                                <param>com.redhat.kb.mcp.RateLimiter</param>
+                                <param>com.redhat.kb.mcp.ToolAuditLog</param>
+                                <param>com.redhat.kb.mcp.ToolGuards</param>
+                                <param>com.redhat.kb.infrastructure.client.SolrQuery</param>
+                                <param>com.redhat.kb.infrastructure.config.StartupConfigCheck</param>
+                                <param>com.redhat.kb.infrastructure.credential.RedHatCredential</param>
+                            </targetClasses>
+                            <targetTests>
+                                <param>com.redhat.kb.*</param>
+                            </targetTests>
+                            <!-- Every @QuarkusTest is excluded, and not only for speed: PIT
+                                 runs tests in its own minion JVM with no Quarkus lifecycle,
+                                 so these do not merely run slowly there, they cannot pass at
+                                 all. PIT refuses to start against a suite that is red for
+                                 reasons unrelated to mutation, which is what listing them
+                                 here prevents. The units below carry the logic anyway. -->
+                            <excludedTestClasses>
+                                <param>com.redhat.kb.mcp.*ProtocolTest</param>
+                                <param>com.redhat.kb.mcp.Mcp*Test</param>
+                                <param>com.redhat.kb.mcp.LegacySse*Test</param>
+                                <param>com.redhat.kb.mcp.UserToken*Test</param>
+                                <param>com.redhat.kb.mcp.StructuredContent*Test</param>
+                                <param>com.redhat.kb.mcp.AudienceValidationTest</param>
+                                <param>com.redhat.kb.mcp.OutputSchemaConformanceTest</param>
+                                <param>com.redhat.kb.mcp.ToolsListInvarianceTest</param>
+                                <param>com.redhat.kb.infrastructure.credential.CachePartitioningTest</param>
+                            </excludedTestClasses>
+                            <outputFormats>
+                                <param>HTML</param>
+                                <param>XML</param>
+                            </outputFormats>
+                            <timestampedReports>false</timestampedReports>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!--
             `./mvnw package -Psbom` writes a CycloneDX inventory of the JAR's dependencies.
             The container image already ships one, but the released JAR did not, so a

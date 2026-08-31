@@ -6,7 +6,6 @@ import com.redhat.kb.mcp.model.SearchResult;
 import com.redhat.kb.infrastructure.credential.AuthenticationException;
 import com.redhat.kb.infrastructure.credential.CredentialResolver;
 import com.redhat.kb.infrastructure.client.KnowledgeBaseClient;
-import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.credential.MissingCredentialException;
 import com.redhat.kb.infrastructure.credential.RedHatCredential;
 import com.redhat.kb.infrastructure.model.SearchPage;
@@ -19,7 +18,6 @@ import io.quarkiverse.mcp.server.ToolResponse;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Locale;
@@ -40,19 +38,19 @@ import static com.redhat.kb.KnowledgeBaseConstants.MIN_RESULTS;
 @ApplicationScoped
 public class KnowledgeBaseTools {
 
-    private static final Logger LOG = Logger.getLogger(KnowledgeBaseTools.class);
+    private final KnowledgeBaseClient knowledgeBase;
+    private final CredentialResolver credentials;
+    private final ToolAuditLog audit;
+    private final RateLimiter rateLimiter;
 
     @Inject
-    KnowledgeBaseClient knowledgeBase;
-
-    @Inject
-    CredentialResolver credentials;
-
-    @Inject
-    ToolAuditLog audit;
-
-    @Inject
-    RateLimiter rateLimiter;
+    public KnowledgeBaseTools(KnowledgeBaseClient knowledgeBase, CredentialResolver credentials,
+            ToolAuditLog audit, RateLimiter rateLimiter) {
+        this.knowledgeBase = knowledgeBase;
+        this.credentials = credentials;
+        this.audit = audit;
+        this.rateLimiter = rateLimiter;
+    }
 
     @Tool(
             name = "searchKnowledgeBase",
@@ -95,7 +93,7 @@ public class KnowledgeBaseTools {
                     + "(product manuals, identified by URL rather than a numeric ID)",
                     defaultValue = "", required = false) String documentType) {
 
-        Optional<ToolResponse> rejection = validate("query", query);
+        Optional<ToolResponse> rejection = ToolGuards.validate("query", query);
         if (rejection.isPresent()) {
             return rejection.get();
         }
@@ -136,7 +134,7 @@ public class KnowledgeBaseTools {
                     false,
                     List.of(new TextContent(ArticleFormatter.formatSearchResults(structured, query.strip()))),
                     structured,
-                    Map.of());
+                    Map.<MetaKey, Object>of());
         } catch (Exception e) {
             return ToolErrors.toResponse("Search failed", e);
         }
@@ -167,7 +165,7 @@ public class KnowledgeBaseTools {
                     + "passing it is what stops an unrelated document being returned.",
                     defaultValue = "", required = false) String documentKind) {
 
-        Optional<ToolResponse> rejection = validate("articleId", articleId);
+        Optional<ToolResponse> rejection = ToolGuards.validate("articleId", articleId);
         if (rejection.isPresent()) {
             return rejection.get();
         }
@@ -198,38 +196,18 @@ public class KnowledgeBaseTools {
     }
 
     /**
-     * Applies the argument checks shared by every tool.
-     *
-     * <p>Credentials are deliberately not checked here: which token serves a request is
-     * resolved per call, and a caller supplying their own is valid even when the server
-     * holds no shared token.
-     */
-    private Optional<ToolResponse> validate(String argName, String value) {
-        if (value == null || value.isBlank()) {
-            return Optional.of(ToolResponse.error("Error: " + argName + " is required"));
-        }
-        if (value.length() > MAX_QUERY_LENGTH) {
-            return Optional.of(ToolResponse.error(
-                    "Error: " + argName + " too long (max " + MAX_QUERY_LENGTH + " chars)"));
-        }
-        return Optional.empty();
-    }
-
-    /**
      * Refuses the call when the caller has exceeded their share of the Red Hat quota.
+     *
+     * <p>Credentials are deliberately not checked before this point: which token serves a
+     * request is resolved per call, and a caller supplying their own is valid even when
+     * the server holds no shared token.
      *
      * @return the refusal to return, or empty when the call may proceed
      */
     private Optional<ToolResponse> enforceRateLimit(String tool, RedHatCredential credential) {
-        if (rateLimiter.tryAcquire(credential.fingerprint())) {
-            return Optional.empty();
-        }
-        String reason = "rate limit exceeded (" + rateLimiter.callsPerMinute() + " calls/minute)";
-        audit.recordDenied(tool, reason);
-        return Optional.of(ToolResponse.error(
-                "Error: " + reason + ". Wait a moment before retrying."));
+        return ToolGuards.enforceRateLimit(
+                rateLimiter, audit, tool, Optional.of(credential.fingerprint()));
     }
-
 
     private static int clampMaxResults(Integer requested) {
         if (requested == null) {

@@ -1,7 +1,5 @@
 package com.redhat.kb.infrastructure.credential;
 
-import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -12,13 +10,13 @@ import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
+import com.redhat.kb.testing.TestJwt;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -41,14 +39,8 @@ class RedHatAuthClientTest {
         return config;
     }
 
-    /** Builds an unsigned JWT that expires in the given number of seconds. */
     private static String jwt(String subject, long expiresInSeconds) {
-        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
-        String header = encoder.encodeToString("{\"alg\":\"none\"}".getBytes());
-        String payload = encoder.encodeToString(
-                ("{\"sub\":\"" + subject + "\",\"exp\":"
-                        + (Instant.now().getEpochSecond() + expiresInSeconds) + "}").getBytes());
-        return header + "." + payload + ".signature";
+        return TestJwt.unsigned(subject, expiresInSeconds);
     }
 
     private final RedHatAuthClient client = new RedHatAuthClient(config(), new ObjectMapper());
@@ -128,11 +120,5 @@ class RedHatAuthClientTest {
         // does not throw and does not return a stale entry from a different credential.
         assertEquals(expired, client.getAccessToken(credential));
         assertEquals(expired, client.getAccessToken(credential));
-    }
-
-    @Test
-    @DisplayName("reports whether a shared token is configured")
-    void reportsSharedTokenPresence() {
-        assertTrue(client.isConfigured());
     }
 }

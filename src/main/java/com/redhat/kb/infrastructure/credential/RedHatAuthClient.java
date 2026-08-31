@@ -245,10 +245,4 @@ public class RedHatAuthClient {
         }
     }
 
-    /**
-     * Whether a shared token is configured on the server.
-     */
-    public boolean isConfigured() {
-        return config.isConfigured();
-    }
 }

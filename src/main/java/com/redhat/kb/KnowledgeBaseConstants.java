@@ -39,4 +39,16 @@ public final class KnowledgeBaseConstants {
 
     /** Base URL for article links; the full URL is derivable from the article ID. */
     public static final String ARTICLE_BASE_URL = "https://access.redhat.com/solutions/";
+
+    /** Base URL for CVE pages; the full URL is derivable from the CVE name. */
+    public static final String CVE_BASE_URL = "https://access.redhat.com/security/cve/";
+
+    /**
+     * The shape of a CVE identifier, as in CVE-2024-6387.
+     *
+     * <p>Shared so the client that validates an identifier and the formatter that decides
+     * whether to link one cannot disagree about what counts as a CVE: two copies of this
+     * pattern drift in silence, since neither side fails to compile when only one changes.
+     */
+    public static final String CVE_ID_REGEX = "CVE-\\d{4}-\\d{4,19}";
 }

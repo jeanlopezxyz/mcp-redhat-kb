@@ -10,6 +10,9 @@ import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import static com.redhat.kb.KnowledgeBaseConstants.CVE_BASE_URL;
+import static com.redhat.kb.KnowledgeBaseConstants.CVE_ID_REGEX;
+
 /**
  * Renders Security Data and Product Life Cycle records for the model.
  *
@@ -22,8 +25,8 @@ final class SecurityFormatter {
     /** Cap on how many entries of a list are rendered, to bound a widely-affecting CVE. */
     private static final int MAX_ENTRIES = 25;
 
-    /** Mirrors the validation in SecurityDataClient; the id in the body is not trusted. */
-    private static final Pattern CVE_ID = Pattern.compile("CVE-\\d{4}-\\d{4,19}", Pattern.CASE_INSENSITIVE);
+    /** Same shape the client validates; the id in the body is not trusted. */
+    private static final Pattern CVE_ID = Pattern.compile(CVE_ID_REGEX, Pattern.CASE_INSENSITIVE);
 
     private SecurityFormatter() {
         // Utility class
@@ -77,7 +80,7 @@ final class SecurityFormatter {
         if (!CVE_ID.matcher(name).matches()) {
             return "";
         }
-        return "https://access.redhat.com/security/cve/" + name.toLowerCase(Locale.ROOT);
+        return CVE_BASE_URL + name.toLowerCase(Locale.ROOT);
     }
 
     static String formatCve(CveDetail cve) {

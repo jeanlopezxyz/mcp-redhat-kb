@@ -182,19 +182,6 @@ class CredentialResolverTest {
     }
 
     @Test
-    @DisplayName("reports whether a caller without a token can be served")
-    void reportsFallbackAvailability() {
-        // Over HTTP the requirement removes the fallback; over stdio it does not apply.
-        assertTrue(new CredentialResolver(config(SHARED_TOKEN, false), requestWithHeader(null), true)
-                .hasUsableFallback());
-        assertFalse(new CredentialResolver(config(SHARED_TOKEN, true), requestWithHeader(null), true)
-                .hasUsableFallback());
-        assertTrue(new CredentialResolver(config(SHARED_TOKEN, true), noRequest(), false)
-                .hasUsableFallback());
-        assertFalse(new CredentialResolver(config(null, false), noRequest(), false).hasUsableFallback());
-    }
-
-    @Test
     @DisplayName("gives different callers different cache identities")
     void differentCallersGetDifferentFingerprints() {
         // Cache partitioning depends on this: same fingerprint would mean one caller's

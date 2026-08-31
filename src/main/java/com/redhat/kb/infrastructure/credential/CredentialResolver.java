@@ -28,6 +28,9 @@ public class CredentialResolver {
     /** Header carrying the caller's own Red Hat offline token. */
     public static final String USER_TOKEN_HEADER = "X-Red-Hat-Token";
 
+    /** Where a caller generates the offline token this server asks them for. */
+    private static final String TOKEN_PORTAL_URL = "https://access.redhat.com/management/api";
+
     private static final Logger LOG = Logger.getLogger(CredentialResolver.class);
 
     private final RedHatApiConfig config;
@@ -65,7 +68,7 @@ public class CredentialResolver {
             throw new MissingCredentialException(
                     "This server requires your own Red Hat token. Send it in the "
                             + USER_TOKEN_HEADER + " header. Generate one at "
-                            + "https://access.redhat.com/management/api");
+                            + TOKEN_PORTAL_URL);
         }
 
         return sharedCredential().orElseThrow(() -> new MissingCredentialException(
@@ -73,7 +76,7 @@ public class CredentialResolver {
                         ? "No Red Hat token available. Send your own token in the "
                                 + USER_TOKEN_HEADER + " header, or configure REDHAT_TOKEN on the server."
                         : "No Red Hat token available. Set REDHAT_TOKEN in this process's "
-                                + "environment. Generate one at https://access.redhat.com/management/api"));
+                                + "environment. Generate one at " + TOKEN_PORTAL_URL));
     }
 
     /**
@@ -112,16 +115,4 @@ public class CredentialResolver {
                 : Optional.empty();
     }
 
-    /**
-     * Whether this server can serve a caller who supplies no token of their own.
-     *
-     * <p>Over stdio the configured token always applies, since the requirement to bring
-     * your own is an HTTP-transport rule.
-     */
-    public boolean hasUsableFallback() {
-        if (!config.isConfigured()) {
-            return false;
-        }
-        return !config.requireUserToken() || !isHttpRequest();
-    }
 }
