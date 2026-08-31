@@ -1,7 +1,11 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -12,6 +16,8 @@ import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+
+import static com.redhat.kb.KnowledgeBaseConstants.CVE_ID_REGEX;
 
 /**
  * Client for the Red Hat Security Data API.
@@ -25,7 +31,7 @@ import jakarta.ws.rs.core.Response;
 public class SecurityDataClient {
 
     /** CVE identifiers look like CVE-2024-6387. */
-    private static final Pattern CVE_ID = Pattern.compile("CVE-\\d{4}-\\d{4,19}", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CVE_ID = Pattern.compile(CVE_ID_REGEX, Pattern.CASE_INSENSITIVE);
 
     /** Most a response body may occupy; enforced while streaming, never after buffering. */
     private static final int MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
@@ -82,7 +88,7 @@ public class SecurityDataClient {
         if (cveId == null || cveId.isBlank()) {
             throw new KnowledgeBaseException("A CVE identifier is required, for example CVE-2024-6387");
         }
-        String candidate = cveId.strip().toUpperCase();
+        String candidate = cveId.strip().toUpperCase(Locale.ROOT);
         if (!candidate.startsWith("CVE-")) {
             candidate = "CVE-" + candidate;
         }

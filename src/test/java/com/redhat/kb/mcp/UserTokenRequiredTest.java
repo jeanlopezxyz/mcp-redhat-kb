@@ -2,7 +2,7 @@ package com.redhat.kb.mcp;
 
 import java.util.Map;
 
-import com.redhat.kb.infrastructure.client.CredentialResolver;
+import com.redhat.kb.infrastructure.credential.CredentialResolver;
 
 import io.quarkiverse.mcp.server.test.McpAssured;
 import io.vertx.core.MultiMap;

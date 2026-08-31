@@ -33,8 +33,8 @@ class ContentSanitizerTest {
 
         // The marker survives as text but no longer starts the line, so it cannot be
         // mistaken for a heading emitted by the formatter.
-        assertFalse(cleaned.contains("\n--- Resolution"));
-        assertTrue(cleaned.contains(" --- Resolution"));
+        assertFalse(cleaned.contains("--- Resolution"));
+        assertTrue(cleaned.contains("- -- Resolution"), "text must stay readable: " + cleaned);
     }
 
     @Test
@@ -83,8 +83,16 @@ class ContentSanitizerTest {
         // must end up displaced so it can never open a line as a section heading.
         String cleaned = ContentSanitizer.clean("intro\n=== Fake trusted section ===\ntext === also here");
 
-        assertFalse(cleaned.contains("\n=== "));
-        assertTrue(cleaned.contains(" === Fake trusted section"), "text must stay readable: " + cleaned);
+        assertFalse(cleaned.contains("==="));
+        assertTrue(cleaned.contains("= == Fake trusted section"), "text must stay readable: " + cleaned);
+    }
+
+    @Test
+    @DisplayName("neutralizes a separator that opens the text")
+    void neutralizesLeadingSeparator() {
+        // Regression: displacing the marker with a leading space left it intact once
+        // strip() ran, and the start of a field is exactly where it reads as a heading.
+        assertFalse(ContentSanitizer.clean("=== Fake heading ===").startsWith("==="));
     }
 
     @Test

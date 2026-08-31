@@ -1,13 +1,21 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.credential.AuthenticationException;
+import com.redhat.kb.infrastructure.credential.RedHatAuthClient;
+import com.redhat.kb.infrastructure.credential.RedHatCredential;
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+import com.redhat.kb.infrastructure.model.SearchPage;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
 import com.redhat.kb.infrastructure.config.RedHatApiConfig;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseSearchResponseDto;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseArticle;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseSearchResponse;
 
 import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,6 +78,9 @@ public class KnowledgeBaseClient {
         urlBuilder.append("?q=").append(encode(SolrQuery.escape(query)));
         urlBuilder.append("&rows=").append(maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS);
         urlBuilder.append("&fl=").append(SEARCH_FIELDS);
+        // Documentation is published in several languages under the same title, so without
+        // this a page of results is padded with Japanese and Korean copies of one article.
+        urlBuilder.append("&fq=").append(encode("language:en"));
 
         if (product != null && !product.isBlank()) {
             // Matched as a phrase, so the value has to be the product's full name.
@@ -80,7 +91,7 @@ public class KnowledgeBaseClient {
             urlBuilder.append("&fq=documentKind:").append(encode("\"" + SolrQuery.escape(documentType) + "\""));
         }
 
-        KnowledgeBaseSearchResponseDto response =
+        KnowledgeBaseSearchResponse response =
                 execute(credential, urlBuilder.toString(), "search the Knowledge Base");
 
         return new SearchPage(extractDocs(response), extractTotal(response));
@@ -88,25 +99,95 @@ public class KnowledgeBaseClient {
 
     /**
      * Gets the full details of an article by its ID.
+     *
+     * @param documentKind the kind the caller saw in the search results, or empty when it
+     *        does not know one. Ids are shared across kinds, so this is what keeps a
+     *        Vulnerability lookup from being answered with an unrelated Solution.
      */
     @CacheResult(cacheName = "kb-article")
-    public Optional<KnowledgeBaseArticleDto> getArticle(RedHatCredential credential, String articleId) {
+    public Optional<KnowledgeBaseArticle> getArticle(
+            RedHatCredential credential, String articleId, String documentKind) {
         if (!SolrQuery.isValidArticleId(articleId)) {
-            throw new KnowledgeBaseException("Article ID must be numeric");
+            throw new KnowledgeBaseException(
+                    "Article ID must be numeric (e.g. 7136675) or an advisory (e.g. RHSA-2026:6565)");
         }
 
+        // `q=id:<n>` is scored free-text search, not a lookup: Hydra answers an unknown id
+        // with ten unrelated articles, and taking the first one hands the model a different
+        // article than the one asked for. `fq` filters exactly and returns nothing when the
+        // id does not exist.
+        //
+        // The id is quoted because an advisory carries a colon (RHSA-2026:6565), which Solr
+        // would otherwise read as the start of another field.
         String url = baseUrl
-                + "?q=" + encode("id:" + articleId)
+                + "?q=" + encode("*:*")
+                + "&fq=" + encode("id:\"" + articleId + "\"")
+                + "&fq=" + encode("language:en")
                 + "&fl=" + DETAIL_FIELDS;
 
-        return extractDocs(execute(credential, url, "fetch the article")).stream().findFirst();
+        List<KnowledgeBaseArticle> matches = extractDocs(execute(credential, url, "fetch the article"))
+                .stream()
+                // Belt and braces: never return an article whose id is not the one asked
+                // for, whatever the filter did upstream.
+                //
+                // Compared without case because validation accepts an advisory in either
+                // case (`isValidArticleId` is CASE_INSENSITIVE) while Hydra always answers
+                // with the canonical upper-case form. An exact `equals` therefore dropped
+                // every match for `rhsa-2026:6565` and reported the article as missing --
+                // a lookup that validated, ran, and then silently found nothing.
+                .filter(article -> articleId.equalsIgnoreCase(article.getId()))
+                .toList();
+
+        return pick(matches, documentKind);
+    }
+
+    /**
+     * Chooses among documents sharing an id.
+     *
+     * <p>Ids are not unique across document kinds: 33065 is both a Vulnerability about
+     * OpenSSL and an unrelated JBoss Solution. Ranking by how much content a record carries
+     * would answer the Vulnerability with the Solution, because only Solutions have a
+     * resolution field — so the kind the caller saw in the search results decides instead,
+     * and it is only a tie-break when nothing matches it.
+     */
+    private static Optional<KnowledgeBaseArticle> pick(
+            List<KnowledgeBaseArticle> matches, String documentKind) {
+        if (documentKind != null && !documentKind.isBlank()) {
+            Optional<KnowledgeBaseArticle> ofKind = matches.stream()
+                    .filter(article -> documentKind.equalsIgnoreCase(article.getDocumentKind()))
+                    .findFirst();
+            if (ofKind.isPresent()) {
+                return ofKind;
+            }
+        }
+        // No kind asked for, or none matched: prefer the record that actually says
+        // something over an empty stub — id 33098 lists a blank Certification first.
+        return matches.stream().max(Comparator.comparingInt(KnowledgeBaseClient::readableContent));
+    }
+
+    /**
+     * Scores how much of an answer a document carries, to break a tie between records
+     * sharing an id. A resolution outranks a problem statement, which outranks a bare title.
+     */
+    private static int readableContent(KnowledgeBaseArticle article) {
+        int score = 0;
+        if (article.getSolutionResolution() != null) {
+            score += 4;
+        }
+        if (article.getIssue() != null) {
+            score += 2;
+        }
+        if (article.getTitle() != null && !article.getTitle().isBlank()) {
+            score += 1;
+        }
+        return score;
     }
 
     /**
      * Issues the request and deserializes the response, mapping failures to a typed
      * exception whose message names the failure mode.
      */
-    private KnowledgeBaseSearchResponseDto execute(RedHatCredential credential, String url, String action) {
+    private KnowledgeBaseSearchResponse execute(RedHatCredential credential, String url, String action) {
         // Resolved before the request so an SSO failure surfaces as its own
         // AuthenticationException rather than as a Knowledge Base one.
         String accessToken = authClient.getAccessToken(credential);
@@ -118,7 +199,7 @@ public class KnowledgeBaseClient {
             throw new KnowledgeBaseException(describeFailure(response.status(), action));
         }
 
-        return http.readValue(response, KnowledgeBaseSearchResponseDto.class, API);
+        return http.readValue(response, KnowledgeBaseSearchResponse.class, API);
     }
 
     /**
@@ -141,20 +222,20 @@ public class KnowledgeBaseClient {
     /**
      * Extracts the document list, tolerating a response that omits {@code response} or {@code docs}.
      */
-    private static List<KnowledgeBaseArticleDto> extractDocs(KnowledgeBaseSearchResponseDto response) {
+    private static List<KnowledgeBaseArticle> extractDocs(KnowledgeBaseSearchResponse response) {
         return Optional.ofNullable(response)
-                .map(KnowledgeBaseSearchResponseDto::getResponse)
-                .map(KnowledgeBaseSearchResponseDto.Response::getDocs)
+                .map(KnowledgeBaseSearchResponse::getResponse)
+                .map(KnowledgeBaseSearchResponse.Response::getDocs)
                 .orElseGet(List::of);
     }
 
     /**
      * How many documents matched, which is usually far more than one page holds.
      */
-    private static int extractTotal(KnowledgeBaseSearchResponseDto response) {
+    private static int extractTotal(KnowledgeBaseSearchResponse response) {
         return Optional.ofNullable(response)
-                .map(KnowledgeBaseSearchResponseDto::getResponse)
-                .map(KnowledgeBaseSearchResponseDto.Response::getNumFound)
+                .map(KnowledgeBaseSearchResponse::getResponse)
+                .map(KnowledgeBaseSearchResponse.Response::getNumFound)
                 .orElse(0);
     }
 

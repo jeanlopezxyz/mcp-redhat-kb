@@ -76,4 +76,22 @@ class SolrQueryTest {
     void rejectsNullId() {
         assertFalse(SolrQuery.isValidArticleId(null));
     }
+
+    @Test
+    @DisplayName("accepts an advisory id, which search offers alongside article ids")
+    void acceptsAdvisoryIds() {
+        // Errata are returned by search with ids like RHSA-2026:6565. Rejecting them left
+        // the model holding a result it had no way to open.
+        assertTrue(SolrQuery.isValidArticleId("RHSA-2026:6565"));
+        assertTrue(SolrQuery.isValidArticleId("rhba-2025:1234"));
+    }
+
+    @Test
+    @DisplayName("still rejects anything that is neither an article nor an advisory")
+    void rejectsOtherIdentifiers() {
+        assertFalse(SolrQuery.isValidArticleId("1 OR 1=1"));
+        assertFalse(SolrQuery.isValidArticleId("https://docs.redhat.com/en/x"));
+        assertFalse(SolrQuery.isValidArticleId("helm-3.0.0-1.el8.x86_64.rpm"));
+        assertFalse(SolrQuery.isValidArticleId("RHSA-2026:6565 OR id:*"));
+    }
 }

@@ -41,8 +41,8 @@ class KnowledgeBaseToolsProtocolTest {
     }
 
     @Test
-    @DisplayName("exposes exactly the two consolidated tools")
-    void exposesTwoTools() {
+    @DisplayName("exposes exactly the four consolidated tools")
+    void exposesFourTools() {
         client.when()
                 .toolsList(page -> {
                     assertEquals(4, page.size(),
@@ -56,7 +56,7 @@ class KnowledgeBaseToolsProtocolTest {
     }
 
     @Test
-    @DisplayName("declares both tools as read-only and idempotent")
+    @DisplayName("declares every tool as read-only and idempotent")
     void declaresReadOnlyAnnotations() {
         client.when()
                 .toolsList(page -> {

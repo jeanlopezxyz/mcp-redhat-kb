@@ -21,8 +21,8 @@ final class ContentSanitizer {
      * Matches the structural separators emitted by the formatters at any position of a
      * line, not just its start: entity-encoded HTML (&amp;lt;&amp;lt;&amp;lt;) only becomes
      * a literal marker after Jsoup decodes it, and by then it can sit mid-line where a
-     * line-anchored pattern never looks. A space is inserted in front so the marker is
-     * displaced without destroying the surrounding text.
+     * line-anchored pattern never looks. The run is broken from the inside ("= ==") so it
+     * stops parsing as a marker while the surrounding text stays legible.
      */
     private static final Pattern STRUCTURAL_MARKER = Pattern.compile("(---|===|<<<)");
 
@@ -58,7 +58,13 @@ final class ContentSanitizer {
         // Fence labels first: once split they no longer contain "<<<", so the generic
         // marker rule does not touch them a second time.
         text = FENCE_LABEL.matcher(text).replaceAll("<< < $1");
-        text = STRUCTURAL_MARKER.matcher(text).replaceAll(" $1");
+        // Split the run itself rather than pushing it right with a space: a leading space
+        // is undone by the strip() below, which would let a marker that opens the text
+        // survive intact — exactly the position where it reads as one of our separators.
+        text = STRUCTURAL_MARKER.matcher(text).replaceAll(m -> {
+            String marker = m.group(1);
+            return marker.charAt(0) + " " + marker.substring(1);
+        });
         text = EXCESS_BLANK_LINES.matcher(text).replaceAll("\n\n");
         // Non-breaking spaces survive entity decoding and would otherwise reach the
         // model as opaque characters.

@@ -24,6 +24,8 @@ public class StartupConfigCheck {
     private final boolean stdioEnabled;
     private final boolean oidcEnabled;
     private final boolean httpEnabled;
+    private final String httpHost;
+    private final int httpPort;
 
     @Inject
     public StartupConfigCheck(
@@ -33,11 +35,17 @@ public class StartupConfigCheck {
             @ConfigProperty(name = "quarkus.oidc.enabled", defaultValue = "false")
             boolean oidcEnabled,
             @ConfigProperty(name = "quarkus.http.host-enabled", defaultValue = "true")
-            boolean httpEnabled) {
+            boolean httpEnabled,
+            @ConfigProperty(name = "quarkus.http.host", defaultValue = "127.0.0.1")
+            String httpHost,
+            @ConfigProperty(name = "quarkus.http.port", defaultValue = "9081")
+            int httpPort) {
         this.config = config;
         this.stdioEnabled = stdioEnabled;
         this.oidcEnabled = oidcEnabled;
         this.httpEnabled = httpEnabled;
+        this.httpHost = httpHost;
+        this.httpPort = httpPort;
     }
 
     void onStart(@Observes StartupEvent event) {
@@ -65,11 +73,26 @@ public class StartupConfigCheck {
      */
     private void warnIfHttpIsUnauthenticated() {
         if (httpEnabled && !oidcEnabled && config.isConfigured() && !config.requireUserToken()) {
+            // Loopback is only reachable from this machine, so the same configuration is
+            // routine in development and dangerous once the port is published.
+            if (boundBeyondLoopback()) {
+                LOG.errorf("This server is bound to %s with no authentication while a shared "
+                        + "REDHAT_TOKEN is configured: anyone who reaches port %d can spend that "
+                        + "subscription. Set MCP_OIDC_ENABLED=true or MCP_REQUIRE_USER_TOKEN=true, "
+                        + "or bind back to 127.0.0.1.", httpHost, httpPort);
+                return;
+            }
             LOG.warn("The HTTP transport is enabled without authentication while a shared "
                     + "REDHAT_TOKEN is configured. Anyone able to reach this port can use that "
                     + "subscription. Set MCP_OIDC_ENABLED=true, or MCP_REQUIRE_USER_TOKEN=true, "
                     + "before exposing it beyond localhost.");
         }
+    }
+
+    /** Whether the bind address accepts connections from outside this machine. */
+    private boolean boundBeyondLoopback() {
+        String host = httpHost.strip();
+        return !("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host));
     }
 
     /**

@@ -15,8 +15,14 @@ final class SolrQuery {
     private static final Pattern SPECIAL_CHARS =
             Pattern.compile("([+\\-!(){}\\[\\]^\"~*?:\\\\/]|&&|\\|\\|)");
 
-    /** Article IDs in the Red Hat Knowledge Base are numeric. */
-    private static final Pattern ARTICLE_ID = Pattern.compile("\\d{1,12}");
+    /**
+     * Identifiers a lookup accepts. Knowledge Base articles are numeric, while errata carry
+     * an advisory id such as {@code RHSA-2026:6565} — search offers those alongside the
+     * rest, so refusing them left the model with a result it could not open. Both shapes
+     * are fully anchored: anything else is rejected before it reaches the query.
+     */
+    private static final Pattern ARTICLE_ID =
+            Pattern.compile("\\d{1,12}|RH[A-Z]A-\\d{4}:\\d{1,8}", Pattern.CASE_INSENSITIVE);
 
     private SolrQuery() {
         // Utility class
@@ -33,7 +39,8 @@ final class SolrQuery {
     }
 
     /**
-     * Checks that an article ID is strictly numeric before it is interpolated into a query.
+     * Checks that an identifier is one this server knows how to look up — an article
+     * number or an advisory id — before it is interpolated into a query.
      */
     static boolean isValidArticleId(String articleId) {
         return articleId != null && ARTICLE_ID.matcher(articleId).matches();

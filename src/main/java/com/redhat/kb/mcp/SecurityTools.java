@@ -1,11 +1,13 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.CveDetail;
+import com.redhat.kb.mcp.model.LifecycleDetail;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.redhat.kb.infrastructure.client.KnowledgeBaseException;
 import com.redhat.kb.infrastructure.client.LifecycleClient;
 import com.redhat.kb.infrastructure.client.SecurityDataClient;
 
@@ -17,7 +19,6 @@ import io.quarkiverse.mcp.server.ToolResponse;
 import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 /**
  * MCP tools backed by Red Hat's public product APIs.
@@ -31,19 +32,22 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class SecurityTools {
 
-    private static final Logger LOG = Logger.getLogger(SecurityTools.class);
+    /** Stands in for the credential fingerprint in the audit trail: these APIs take none. */
+    private static final String NO_CREDENTIAL = "none-public-api";
+
+    private final SecurityDataClient securityData;
+    private final LifecycleClient lifecycle;
+    private final ToolAuditLog audit;
+    private final RateLimiter rateLimiter;
 
     @Inject
-    SecurityDataClient securityData;
-
-    @Inject
-    LifecycleClient lifecycle;
-
-    @Inject
-    ToolAuditLog audit;
-
-    @Inject
-    RateLimiter rateLimiter;
+    public SecurityTools(SecurityDataClient securityData, LifecycleClient lifecycle,
+            ToolAuditLog audit, RateLimiter rateLimiter) {
+        this.securityData = securityData;
+        this.lifecycle = lifecycle;
+        this.audit = audit;
+        this.rateLimiter = rateLimiter;
+    }
 
     @Tool(
             name = "lookupCve",
@@ -65,15 +69,17 @@ public class SecurityTools {
     public ToolResponse lookupCve(
             @ToolArg(description = "CVE identifier, e.g. 'CVE-2024-6387'") String cveId) {
 
-        if (cveId == null || cveId.isBlank()) {
-            return ToolResponse.error("Error: cveId is required, for example CVE-2024-6387");
+        Optional<ToolResponse> rejection = ToolGuards.validate("cveId", cveId,
+                "Error: cveId is required, for example CVE-2024-6387");
+        if (rejection.isPresent()) {
+            return rejection.get();
         }
 
         Optional<ToolResponse> throttled = enforceRateLimit("lookupCve");
         if (throttled.isPresent()) {
             return throttled.get();
         }
-        audit.record("lookupCve", cveId, "none-public-api");
+        audit.record("lookupCve", cveId, NO_CREDENTIAL);
 
         try {
             Optional<JsonNode> record = securityData.lookupCve(cveId);
@@ -96,7 +102,7 @@ public class SecurityTools {
                     detail,
                     Map.<MetaKey, Object>of());
         } catch (Exception e) {
-            return toErrorResponse("CVE lookup failed", e);
+            return ToolErrors.toResponse("CVE lookup failed", e);
         }
     }
 
@@ -121,15 +127,17 @@ public class SecurityTools {
             @ToolArg(description = "Full product name, e.g. 'Red Hat OpenShift Container Platform'")
             String product) {
 
-        if (product == null || product.isBlank()) {
-            return ToolResponse.error("Error: product is required");
+        Optional<ToolResponse> rejection = ToolGuards.validate("product", product,
+                "Error: product is required");
+        if (rejection.isPresent()) {
+            return rejection.get();
         }
 
         Optional<ToolResponse> throttled = enforceRateLimit("getProductLifecycle");
         if (throttled.isPresent()) {
             return throttled.get();
         }
-        audit.record("getProductLifecycle", product, "none-public-api");
+        audit.record("getProductLifecycle", product, NO_CREDENTIAL);
 
         try {
             Optional<JsonNode> record = lifecycle.lookupProduct(product);
@@ -150,7 +158,7 @@ public class SecurityTools {
                     detail,
                     Map.<MetaKey, Object>of());
         } catch (Exception e) {
-            return toErrorResponse("Life cycle lookup failed", e);
+            return ToolErrors.toResponse("Life cycle lookup failed", e);
         }
     }
 
@@ -160,23 +168,6 @@ public class SecurityTools {
      * bucket — the very starvation the limiter exists to prevent.
      */
     private Optional<ToolResponse> enforceRateLimit(String tool) {
-        if (rateLimiter.tryAcquire()) {
-            return Optional.empty();
-        }
-        String reason = "rate limit exceeded (" + rateLimiter.callsPerMinute() + " calls/minute)";
-        audit.recordDenied(tool, reason);
-        return Optional.of(ToolResponse.error("Error: " + reason + ". Wait a moment before retrying."));
-    }
-
-    /**
-     * Only messages from our own typed exceptions are relayed; anything else could carry
-     * response bodies, so the detail goes to the log instead.
-     */
-    private ToolResponse toErrorResponse(String context, Exception e) {
-        LOG.errorf(e, "%s", context);
-        if (e instanceof KnowledgeBaseException) {
-            return ToolResponse.error("Error: " + e.getMessage());
-        }
-        return ToolResponse.error("Error: " + context + ". Check the server logs for details.");
+        return ToolGuards.enforceRateLimit(rateLimiter, audit, tool, Optional.empty());
     }
 }

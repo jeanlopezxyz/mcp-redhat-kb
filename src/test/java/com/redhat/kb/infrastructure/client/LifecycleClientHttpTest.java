@@ -1,5 +1,8 @@
 package com.redhat.kb.infrastructure.client;
 
+import com.redhat.kb.infrastructure.http.BoundedJsonHttp;
+import com.redhat.kb.infrastructure.http.KnowledgeBaseException;
+
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -136,5 +139,36 @@ class LifecycleClientHttpTest {
         when(urls.lifecycle()).thenReturn(stubUrl);
         when(config.urls()).thenReturn(urls);
         return config;
+    }
+
+    @Test
+    @DisplayName("refuses to guess when a name matches several products")
+    void refusesAnAmbiguousProductName() {
+        // The API matches substrings: "OpenShift" returns thirteen products. Answering with
+        // one of them presents another product's end-of-life dates as the answer, and the
+        // caller has no way to tell it asked about something else.
+        server.respond(200, """
+                {"data":[{"name":"builds for Red Hat OpenShift"},
+                         {"name":"logging for Red Hat OpenShift"},
+                         {"name":"Red Hat OpenShift Container Platform"}]}""");
+
+        KnowledgeBaseException e = assertThrows(KnowledgeBaseException.class,
+                () -> client.lookupProduct("OpenShift"));
+
+        assertTrue(e.getMessage().contains("matches 3 products"), e.getMessage());
+        assertTrue(e.getMessage().contains("Red Hat OpenShift Container Platform"),
+                "the message must name the candidates so the caller can retry: " + e.getMessage());
+    }
+
+    @Test
+    @DisplayName("takes the exact name even when other products also match")
+    void prefersTheExactName() {
+        server.respond(200, """
+                {"data":[{"name":"logging for Red Hat OpenShift"},
+                         {"name":"Red Hat Enterprise Linux","versions":[]}]}""");
+
+        assertEquals("Red Hat Enterprise Linux",
+                client.lookupProduct("Red Hat Enterprise Linux").orElseThrow()
+                        .path("name").asText());
     }
 }

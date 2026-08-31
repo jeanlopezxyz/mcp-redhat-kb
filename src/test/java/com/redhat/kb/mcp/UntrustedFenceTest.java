@@ -23,7 +23,7 @@ class UntrustedFenceTest {
 
     @Test
     @DisplayName("nonce is hex and long enough to be unguessable, short enough to be cheap")
-    void nonceFormat() {
+    void usesShortHexNonce() {
         String nonce = UntrustedFence.newFence().nonce();
 
         // 20 hex chars = 80 bits: unpredictable for content, negligible for token budgets.

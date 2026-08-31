@@ -1,12 +1,15 @@
 package com.redhat.kb.mcp;
 
+import com.redhat.kb.mcp.model.ArticleDetail;
+import com.redhat.kb.mcp.model.SearchResult;
+
 import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.redhat.kb.infrastructure.client.SearchPage;
-import com.redhat.kb.infrastructure.dto.KnowledgeBaseArticleDto;
+import com.redhat.kb.infrastructure.model.SearchPage;
+import com.redhat.kb.infrastructure.model.KnowledgeBaseArticle;
 
 import static com.redhat.kb.KnowledgeBaseConstants.ARTICLE_BASE_URL;
 import static com.redhat.kb.KnowledgeBaseConstants.MAX_ARTICLE_CHARS;
@@ -50,9 +53,10 @@ final class ArticleFormatter {
                 .map(a -> new SearchResult.Article(
                         a.getId(),
                         ContentSanitizer.clean(a.getTitle()),
-                        defaultIfBlank(a.getDocumentKind(), "Article"),
+                        defaultIfBlank(ContentSanitizer.clean(a.getDocumentKind()), "Article"),
                         safeUrl(a),
-                        ContentSanitizer.truncate(ContentSanitizer.clean(a.getAbstractText()), MAX_SUMMARY_CHARS)))
+                        ContentSanitizer.truncate(ContentSanitizer.clean(a.getAbstractText()), MAX_SUMMARY_CHARS),
+                        calendarDay(a.getLastModifiedDate())))
                 .toList();
         return new SearchResult(articles.size(), page.totalFound(), articles);
     }
@@ -85,8 +89,15 @@ final class ArticleFormatter {
         sb.append(fence.open()).append('\n');
 
         for (SearchResult.Article article : result.articles()) {
-            sb.append(article.id()).append(" [").append(article.documentKind()).append("] ")
-              .append(article.title()).append('\n');
+            sb.append(article.id()).append(" [").append(article.documentKind()).append("] ");
+            if (!article.lastModified().isEmpty()) {
+                // Age is a tie-breaker the title cannot carry: two articles can describe the
+                // same failure while only the recent one matches a supported version.
+                sb.append('(').append(article.lastModified()).append(") ");
+            }
+            // A few document kinds publish no title; saying so beats a line that trails off
+            // after the ID and reads as truncated output.
+            sb.append(article.title().isEmpty() ? "(untitled)" : article.title()).append('\n');
 
             if (!article.summary().isEmpty()) {
                 sb.append("    ").append(article.summary()).append('\n');
@@ -102,7 +113,7 @@ final class ArticleFormatter {
      * Builds the structured payload for a single article. Sections are capped individually
      * and the article as a whole, so an oversized upstream body cannot flood the context.
      */
-    static ArticleDetail toArticleDetail(KnowledgeBaseArticleDto article) {
+    static ArticleDetail toArticleDetail(KnowledgeBaseArticle article) {
         // Ordered so the whole-article budget is spent on the most useful sections first:
         // a reader needs the resolution far more often than the diagnostic transcript.
         Map<String, List<String>> sections = new LinkedHashMap<>();
@@ -117,7 +128,7 @@ final class ArticleFormatter {
         return new ArticleDetail(
                 article.getId(),
                 ContentSanitizer.clean(article.getTitle()),
-                defaultIfBlank(article.getDocumentKind(), "Article"),
+                defaultIfBlank(ContentSanitizer.clean(article.getDocumentKind()), "Article"),
                 safeUrl(article),
                 ContentSanitizer.clean(article.getProduct()),
                 sections.get("Environment"),
@@ -136,7 +147,11 @@ final class ArticleFormatter {
         StringBuilder sb = new StringBuilder();
         sb.append("=== ").append(detail.documentKind()).append(" ===\n\n");
         sb.append("ID: ").append(detail.id()).append('\n');
-        sb.append("Title: ").append(detail.title()).append('\n');
+        // Not every document kind carries a title — some Discussion entries have none — and
+        // an empty "Title:" line reads as a title the server failed to fetch.
+        if (!detail.title().isEmpty()) {
+            sb.append("Title: ").append(detail.title()).append('\n');
+        }
         sb.append("URL: ").append(detail.url()).append('\n');
 
         if (!detail.products().isEmpty()) {
@@ -225,7 +240,7 @@ final class ArticleFormatter {
      * the API is only echoed when it is an HTTPS redhat.com address, so a tampered record
      * cannot present an arbitrary link to the model as official.
      */
-    private static String safeUrl(KnowledgeBaseArticleDto article) {
+    private static String safeUrl(KnowledgeBaseArticle article) {
         String viewUri = article.getViewUri();
         if (viewUri != null && !viewUri.isBlank()) {
             try {
@@ -240,6 +255,18 @@ final class ArticleFormatter {
             }
         }
         return article.getId() != null ? ARTICLE_BASE_URL + article.getId() : "N/A";
+    }
+
+    /**
+     * Keeps the calendar day of an upstream timestamp ({@code 2024-06-13T23:37:19Z}). The
+     * time of day says nothing about how current an article is and costs tokens per result.
+     */
+    private static String calendarDay(String timestamp) {
+        if (timestamp == null || timestamp.length() < 10) {
+            return "";
+        }
+        String day = timestamp.substring(0, 10);
+        return day.matches("\\d{4}-\\d{2}-\\d{2}") ? day : "";
     }
 
     private static String defaultIfBlank(String value, String fallback) {

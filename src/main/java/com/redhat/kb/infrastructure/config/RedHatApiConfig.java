@@ -1,5 +1,6 @@
 package com.redhat.kb.infrastructure.config;
 
+import java.util.List;
 import java.util.Optional;
 
 import io.smallrye.config.ConfigMapping;
@@ -46,12 +47,20 @@ public interface RedHatApiConfig {
     Urls urls();
 
     /**
-     * Checks if the service is properly configured.
+     * Placeholders the documentation hands out in place of a real token. They are rejected
+     * as "not configured": a copied example otherwise passes this check and fails much
+     * later, as an opaque 401 from Red Hat SSO.
      */
+    List<String> TOKEN_PLACEHOLDERS = List.of(
+            "your-offline-token-here", "your-offline-token", "your-token-here", "your-token");
+
+    /** Whether a usable shared token is configured, ignoring documentation placeholders. */
     default boolean isConfigured() {
-        return offlineToken().isPresent() &&
-               !offlineToken().get().isBlank() &&
-               !offlineToken().get().equals("your-offline-token-here");
+        return offlineToken()
+                .map(String::strip)
+                .filter(token -> !token.isBlank())
+                .filter(token -> !TOKEN_PLACEHOLDERS.contains(token))
+                .isPresent();
     }
 
     interface Sso {

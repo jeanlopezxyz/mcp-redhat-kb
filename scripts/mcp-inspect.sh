@@ -10,7 +10,7 @@
 #   scripts/mcp-inspect.sh                          # list tools
 #   scripts/mcp-inspect.sh tools/list
 #   scripts/mcp-inspect.sh call searchKnowledgeBase query="CrashLoopBackOff"
-#   scripts/mcp-inspect.sh call getSolution solutionId=7129807
+#   scripts/mcp-inspect.sh call getArticle articleId=7129807
 #   JAR=/path/to/mcp-redhat-kb.jar scripts/mcp-inspect.sh   # test a released JAR
 #
 # REDHAT_TOKEN is optional: without a valid one the tools still answer, they just fail at
@@ -35,9 +35,10 @@ trap 'rm -f "$LAUNCHER"' EXIT
 
 cat > "$LAUNCHER" <<EOF
 #!/bin/sh
-# Exported explicitly: the value must reach the JVM process, not just this shell.
-REDHAT_TOKEN="\${REDHAT_TOKEN:-inspector-placeholder-token}"
-export REDHAT_TOKEN
+# Baked in rather than inherited: the Inspector spawns the server with a clean
+# environment, so a \$REDHAT_TOKEN read here would always be empty and every
+# credentialed call would come back as "SSO rejected the token (HTTP 400)".
+export REDHAT_TOKEN='${REDHAT_TOKEN:-inspector-placeholder-token}'
 exec java \\
   -Dquarkus.http.host-enabled=false \\
   -Dquarkus.mcp.server.stdio.enabled=true \\
@@ -45,7 +46,8 @@ exec java \\
   -Dquarkus.log.level=WARN \\
   -jar "$JAR"
 EOF
-chmod +x "$LAUNCHER"
+# 700, not +x: the file holds the token, so no other user may read it.
+chmod 700 "$LAUNCHER"
 
 run_inspector() {
   # The Inspector exits 5 when a tool returns isError:true. That is the tool reporting a

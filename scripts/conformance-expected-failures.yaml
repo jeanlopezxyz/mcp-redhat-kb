@@ -1,0 +1,54 @@
+# Baseline for the official MCP conformance suite (scripts/mcp-conformance.sh).
+#
+# Every entry here is a scenario that fails because it asks for a capability or a fixture
+# this server deliberately does not have -- not because the protocol is implemented wrongly.
+# The suite is written against the specification's reference server, which publishes a set
+# of `test_*` tools, `test://` resources and `test_*` prompts for it to drive.
+#
+# Keeping the list explicit is the point: the runner fails the build both on a scenario that
+# starts failing outside this list AND on one listed here that starts passing (a stale
+# entry). So if a future SDK upgrade breaks `tools-list`, or this server grows `resources`,
+# the baseline says so instead of silently absorbing it.
+#
+# What is NOT in this list -- and therefore must always pass:
+#   server-initialize, ping, logging-set-level, tools-list,
+#   server-sse-multiple-streams, resources-list, prompts-list,
+#   dns-rebinding-protection
+#
+# Those are the scenarios that exercise the protocol this server actually speaks, including
+# the parts the Quarkus extension generates rather than this codebase. They are the reason
+# the suite is wired up at all.
+
+server:
+  # --- Fixture tools this server does not implement -------------------------------------
+  # Each of these calls a `test_*` tool by name. A real server has its own tools, so the
+  # scenario cannot apply. Verified: the server answers each with JSON-RPC -32602
+  # "Invalid tool name", which is itself the correct response to an unknown tool.
+  - tools-call-simple-text          # wants tool `test_simple_text`
+  - tools-call-image                # wants tool `test_image_content`
+  - tools-call-audio                # wants tool `test_audio_content`
+  - tools-call-embedded-resource    # wants tool `test_embedded_resource`
+  - tools-call-mixed-content        # wants tool `test_mixed_content`
+  - tools-call-error                # wants tool `test_error_handling`
+  - tools-call-with-progress        # wants tool `test_progress_notification`
+
+  # --- Capabilities this server does not declare ----------------------------------------
+  # These require server features that are absent by design: this is a read-only proxy over
+  # Red Hat's APIs, so it advertises `tools` and `logging` and nothing else. `resources-list`
+  # and `prompts-list` still pass, because answering an empty list is the correct behaviour
+  # for a server without them -- it is only the read/get scenarios that need fixtures.
+  - tools-call-with-logging         # wants tool `test_tool_with_logging`
+  - tools-call-sampling             # sampling: a client capability this server never requests
+  - tools-call-elicitation          # elicitation: same, and it would break a read-only tool
+  - elicitation-sep1034-defaults    # wants tool `test_elicitation_sep1034_defaults`
+  - elicitation-sep1330-enums       # wants tool `test_elicitation_sep1330_enums`
+  - completion-complete             # completions capability, tied to the prompts below
+  - resources-read-text             # wants resource `test://static-text`
+  - resources-read-binary           # wants resource `test://static-binary`
+  - resources-templates-read        # wants a resource template
+  - resources-subscribe             # resource subscriptions
+  - resources-unsubscribe           # resource subscriptions
+  - prompts-get-simple              # wants prompt `test_simple_prompt`
+  - prompts-get-with-args           # wants prompt `test_prompt_with_arguments`
+  - prompts-get-embedded-resource   # wants a prompt embedding a resource
+  - prompts-get-with-image          # wants a prompt returning an image
